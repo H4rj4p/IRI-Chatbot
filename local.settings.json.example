@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "MySqlHost": "YOUR_WINDOWS_IP",
+    "SqlConnectionString": "Server=localhost;Port=3306;Database=your_database;User ID=your_user;Password=your_password;",
+    "OpenAIApiKey": "sk-your-openai-api-key",
+    "OpenAIModel": "gpt-4o-mini"
+  }
+}
