@@ -207,8 +207,8 @@
     }
     .chart-canvas-wrap {
       position: relative;
-      height: 260px;
-      max-width: 520px;
+      height: 360px;
+      max-width: 820px;
     }
     .chart-canvas-wrap.hidden { display: none; }
     .result-actions {
@@ -225,7 +225,20 @@
       flex-wrap: wrap;
       gap: 6px;
     }
+    .primary-actions {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .chart-type-actions.hidden { display: none; }
+    .data-table-wrap {
+      max-height: 320px;
+      overflow: auto;
+    }
     .data-table-wrap.hidden { display: none; }
+    .data-table-wrap.expanded {
+      max-height: 70vh;
+      max-width: min(1100px, calc(100vw - 140px));
+    }
     .mini-btn {
       background: #ffffff;
       color: #111827;
@@ -498,7 +511,7 @@
       return `
         <div class="chart-wrap">
           <div class="chart-header">
-            <div class="chart-label">Chart</div>
+            <div class="chart-label">${isVisible ? "Chart" : "Visualization"}</div>
           </div>
           <div class="chart-canvas-wrap${isVisible ? "" : " hidden"}">
             <canvas id="${chartId}"></canvas>
@@ -648,7 +661,7 @@
       `;
     }
 
-    function renderResultActions(chartId, activeType, rows) {
+    function renderResultActions(chartId, activeType, rows, isChartVisible) {
       if (!rows || rows.length === 0) return "";
 
       const chartTypes = ["bar", "line", "pie"];
@@ -661,13 +674,15 @@
 
       return `
         <div class="result-actions" data-chart-id="${escapeAttr(chartId || "")}">
-          <div class="chart-type-actions">
+          <div class="chart-type-actions primary-actions">
+            <button type="button" class="mini-btn ${isChartVisible ? "active" : ""}" data-action="show-chart">Show charts</button>
+            <button type="button" class="mini-btn" data-action="expand-table">Enlarge table</button>
+          </div>
+          <div class="chart-type-actions chart-options${isChartVisible ? "" : " hidden"}">
             ${chartButtons}
-            <button type="button" class="mini-btn chart-type ${!activeType ? "active" : ""}" data-action="table">Table</button>
           </div>
           <div class="export-actions">
             <button type="button" class="mini-btn secondary" data-action="csv">Export CSV</button>
-            <button type="button" class="mini-btn secondary" data-action="png">Export PNG</button>
           </div>
         </div>
       `;
@@ -709,8 +724,12 @@
       if (!spec || !wrap) return false;
 
       wrap.classList.remove("hidden");
+      const options = row.querySelector(".chart-options");
+      if (options) options.classList.remove("hidden");
       mountChart(chartId, spec);
       setActiveChartButton(row, spec.type);
+      const showButton = row.querySelector('[data-action="show-chart"]');
+      if (showButton) showButton.classList.add("active");
       const table = row.querySelector(".data-table-wrap");
       if (table) table.classList.add("hidden");
       return spec;
@@ -724,9 +743,27 @@
       }
       const wrap = row.querySelector(".chart-canvas-wrap");
       if (wrap) wrap.classList.add("hidden");
+      const options = row.querySelector(".chart-options");
+      if (options) options.classList.add("hidden");
       const table = row.querySelector(".data-table-wrap");
       if (table) table.classList.remove("hidden");
+      const showButton = row.querySelector('[data-action="show-chart"]');
+      if (showButton) showButton.classList.remove("active");
       setActiveChartButton(row, null);
+    }
+
+    function toggleTableExpanded(row, chartId) {
+      hideChart(row, chartId);
+      const table = row.querySelector(".data-table-wrap");
+      if (!table) return;
+
+      table.classList.toggle("expanded");
+      const button = row.querySelector('[data-action="expand-table"]');
+      if (button) {
+        button.textContent = table.classList.contains("expanded")
+          ? "Shrink table"
+          : "Enlarge table";
+      }
     }
 
     function downloadFile(filename, content, type) {
@@ -755,19 +792,6 @@
       ];
 
       downloadFile("iri-ai-results.csv", lines.join("\n"), "text/csv;charset=utf-8");
-    }
-
-    function exportChartAsPng(chartId) {
-      const chart = chartInstances.get(chartId);
-      if (!chart) return false;
-
-      const link = document.createElement("a");
-      link.href = chart.toBase64Image();
-      link.download = "iri-ai-chart.png";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      return true;
     }
 
     function renderConfirmButtons(candidates, originalQuestion) {
@@ -833,7 +857,7 @@
         : resolveChartType(rows, options.chartType, options.question || options.originalQuestion || "");
       const chartSpec = resolvedChartType ? buildChartSpec(rows, resolvedChartType) : null;
       const chartId = rows && rows.length > 0 ? `chart-${++chartCounter}` : null;
-      const actionHtml = chartId ? renderResultActions(chartId, chartSpec?.type || null, rows) : "";
+      const actionHtml = chartId ? renderResultActions(chartId, chartSpec?.type || null, rows, !!chartSpec) : "";
       const chartHtml = chartId ? renderChartCanvas(chartId, !!chartSpec, actionHtml) : "";
       const tableHtml = renderDataView(rows, !!chartSpec);
       const detailsHtml = renderDetails(query, rows);
@@ -862,14 +886,20 @@
         btn.addEventListener("click", () => {
           const action = btn.dataset.action;
 
+          if (action === "show-chart") {
+            const spec = showChart(row, chartId, rows, chartSpec?.type || "bar");
+            if (spec && lastResultContext) lastResultContext.chart_type = spec.type;
+            return;
+          }
+
           if (action === "chart") {
             const spec = showChart(row, chartId, rows, btn.dataset.chartType);
             if (spec && lastResultContext) lastResultContext.chart_type = spec.type;
             return;
           }
 
-          if (action === "table") {
-            hideChart(row, chartId);
+          if (action === "expand-table") {
+            toggleTableExpanded(row, chartId);
             if (lastResultContext) lastResultContext.chart_type = "table";
             return;
           }
@@ -877,14 +907,6 @@
           if (action === "csv") {
             exportRowsAsCsv(rows);
             return;
-          }
-
-          if (action === "png") {
-            let exported = exportChartAsPng(chartId);
-            if (!exported) {
-              const spec = showChart(row, chartId, rows, "bar");
-              exported = !!spec && exportChartAsPng(chartId);
-            }
           }
         });
       });
