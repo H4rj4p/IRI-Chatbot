@@ -238,6 +238,7 @@
     const chatHistory = [];
     let lastUserQuestion = "";
     let chartCounter = 0;
+    let lastResultContext = null;
 
     const CHART_COLORS = [
       "#19c37d", "#5436da", "#3b82f6", "#f59e0b", "#ef4444",
@@ -334,9 +335,20 @@
         .test(question || "");
     }
 
+    function requestedChartType(question) {
+      const text = question || "";
+      if (/\bpie(\s+chart)?\b/i.test(text)) return "pie";
+      if (/\bline(\s+chart|\s+graph)?\b/i.test(text)) return "line";
+      if (/\bbar(\s+chart|\s+graph)?\b/i.test(text)) return "bar";
+      return null;
+    }
+
     function resolveChartType(rows, chartType, question) {
       if (!userWantsChart(question)) return null;
       if (!rows || rows.length === 0) return null;
+
+      const requested = requestedChartType(question);
+      if (requested) return requested;
 
       if (chartType && chartType !== "table") return chartType;
 
@@ -554,7 +566,26 @@
       messages.appendChild(row);
       if (chartSpec && chartId) mountChart(chartId, chartSpec);
       messages.scrollTop = messages.scrollHeight;
-      chatHistory.push({ role: "assistant", content: answer });
+
+      if (!options.needsConfirmation && rows && rows.length > 0 && query && query !== "NA") {
+        lastResultContext = {
+          question: options.question || options.originalQuestion || lastUserQuestion,
+          answer,
+          query,
+          data: rows.slice(0, 100),
+          chart_type: options.chartType || resolvedChartType || "table"
+        };
+      }
+
+      const historyParts = [answer];
+      if (query && query !== "NA") historyParts.push(`SQL: ${query}`);
+      if (rows && rows.length > 0) {
+        const columns = Object.keys(rows[0]);
+        historyParts.push(`Columns: ${columns.join(", ")}`);
+        historyParts.push(`Rows shown: ${rows.length}`);
+        historyParts.push(`First rows: ${JSON.stringify(rows.slice(0, 5))}`);
+      }
+      chatHistory.push({ role: "assistant", content: historyParts.join("\n") });
     }
 
     function addBot(text, meta) {
@@ -589,6 +620,7 @@
 
       try {
         const payload = { message: text, history };
+        if (lastResultContext) payload.last_result = lastResultContext;
         if (confirmedSurname) payload.confirmed_surname = confirmedSurname;
         if (confirmedCustomerId) payload.confirmed_customer_id = String(confirmedCustomerId);
 
@@ -610,7 +642,10 @@
             friendlyError(data),
             data.data || [],
             data.query || "",
-            { chartType: data.chart_type || "table" }
+            {
+              chartType: data.chart_type || "table",
+              question: text
+            }
           );
           return;
         }

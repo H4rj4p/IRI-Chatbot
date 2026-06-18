@@ -248,6 +248,7 @@ COMPARISON_PATTERN = re.compile(
 
 ID_COLUMNS = {"customerid", "rownumber", "id"}
 CATEGORY_COLUMNS = {"geography", "gender", "surname"}
+VALID_CHART_TYPES = {"bar", "line", "pie"}
 
 
 def is_multi_part(question):
@@ -557,6 +558,119 @@ def wants_chart(question):
     return bool(question and CHART_PATTERN.search(question))
 
 
+def requested_chart_type(question):
+    text = (question or "").lower()
+    if re.search(r"\bpie(?:\s+chart)?\b", text):
+        return "pie"
+    if re.search(r"\bline(?:\s+chart|\s+graph)?\b", text):
+        return "line"
+    if re.search(r"\bbar(?:\s+chart|\s+graph)?\b", text):
+        return "bar"
+    return None
+
+
+def is_chart_followup(question):
+    if not wants_chart(question):
+        return False
+
+    tokens = re.findall(r"[a-z0-9]+", (question or "").lower())
+    filler = {
+        "a",
+        "an",
+        "and",
+        "as",
+        "bar",
+        "can",
+        "chart",
+        "charts",
+        "customer",
+        "customers",
+        "diagram",
+        "graph",
+        "graphs",
+        "it",
+        "line",
+        "make",
+        "me",
+        "now",
+        "of",
+        "ok",
+        "okay",
+        "people",
+        "person",
+        "pie",
+        "please",
+        "plot",
+        "for",
+        "result",
+        "results",
+        "show",
+        "that",
+        "the",
+        "them",
+        "these",
+        "this",
+        "those",
+        "to",
+        "turn",
+        "visual",
+        "visualize",
+        "visualise",
+        "you",
+    }
+    meaningful_tokens = [token for token in tokens if token not in filler]
+    return len(meaningful_tokens) == 0
+
+
+def parse_last_result(payload):
+    last_result = payload.get("last_result") if isinstance(payload, dict) else None
+    if not isinstance(last_result, dict):
+        return None
+
+    rows = last_result.get("data")
+    if not isinstance(rows, list):
+        rows = []
+
+    clean_rows = []
+    for row in rows[:MAX_ROWS]:
+        if isinstance(row, dict):
+            clean_rows.append(row)
+
+    return {
+        "question": str(last_result.get("question") or ""),
+        "answer": str(last_result.get("answer") or ""),
+        "query": str(last_result.get("query") or ""),
+        "chart_type": str(last_result.get("chart_type") or "table"),
+        "data": clean_rows,
+    }
+
+
+def summarize_last_result(last_result):
+    if not last_result or not last_result.get("data"):
+        return ""
+
+    rows = last_result["data"]
+    columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+    preview = rows[:5]
+    parts = [
+        "Previous result context:",
+        f"Previous question: {last_result.get('question', '')}",
+        f"Previous SQL query: {last_result.get('query', '')}",
+        f"Previous columns: {', '.join(columns)}",
+        f"Previous rows shown: {len(rows)}",
+        f"First rows: {json.dumps(preview, default=str)}",
+    ]
+
+    return "\n".join(part for part in parts if part.strip())
+
+
+def add_result_context_to_history(history, last_result):
+    summary = summarize_last_result(last_result)
+    if not summary:
+        return history
+    return [*history, {"role": "assistant", "content": summary}]
+
+
 def is_numeric(value):
     if value is None or isinstance(value, bool):
         return False
@@ -590,12 +704,19 @@ def find_label_column(row):
 
 
 def recommend_chart(data, llm_chart_type, question):
-    if not wants_chart(question) or not data:
+    explicit_chart_type = requested_chart_type(question)
+    if not data or (not wants_chart(question) and explicit_chart_type is None):
         return "table"
 
     first = data[0]
     numeric_cols = get_numeric_columns(first)
     label_col = find_label_column(first)
+    preferred_chart_type = explicit_chart_type
+    if preferred_chart_type is None and llm_chart_type in VALID_CHART_TYPES:
+        preferred_chart_type = llm_chart_type
+
+    if preferred_chart_type is not None:
+        return preferred_chart_type
 
     if len(data) == 1:
         if len(numeric_cols) >= 2 and label_col is None:
@@ -613,13 +734,34 @@ def recommend_chart(data, llm_chart_type, question):
         if len(data) <= 25:
             return "bar"
 
-    if llm_chart_type in {"bar", "line", "pie", "table"}:
-        return llm_chart_type
-
     if len(data) >= 2 and numeric_cols:
         return "bar"
 
     return "table"
+
+
+def build_chart_followup_response(question, last_result):
+    if not last_result or not last_result.get("data"):
+        return None
+
+    rows = last_result["data"]
+    chart_type = requested_chart_type(question) or recommend_chart(rows, last_result.get("chart_type"), question)
+    if chart_type == "table":
+        chart_type = recommend_chart(rows, "bar", "show me a chart")
+
+    answer = (
+        f"Here is a {chart_type} chart for the previous results."
+        if chart_type != "table"
+        else "I can show the previous results, but they do not have enough chartable values for a graph."
+    )
+
+    return {
+        "query": last_result.get("query") or "",
+        "answer": answer,
+        "data": rows,
+        "chart_type": chart_type,
+        "chart_followup": True,
+    }
 
 
 def generate_sql(question, history, customers_table, confirmed_surname, confirmed_customer_id):
@@ -733,9 +875,15 @@ def test_sql_connection():
 def ask_question():
     payload = request.get_json(silent=True) or {}
     question, history, confirmed_surname, confirmed_customer_id = parse_chat_request(payload)
+    last_result = parse_last_result(payload)
 
     if not question.strip():
         return jsonify({"error": 'Send JSON like { "message": "your question", "history": [] }.'})
+
+    if is_chart_followup(question):
+        chart_response = build_chart_followup_response(question, last_result)
+        if chart_response is not None:
+            return jsonify(chart_response)
 
     if get_connection_args() is None:
         return jsonify({"error": "SqlConnectionString is not configured."})
@@ -748,6 +896,7 @@ def ask_question():
         )
 
     try:
+        history = add_result_context_to_history(history, last_result)
         customers_table = schema_provider.get_customers_table_name()
         if not customers_table:
             tables = schema_provider.list_tables()
