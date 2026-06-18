@@ -871,16 +871,9 @@ def build_compact_result_answer(question, results):
     noun = noun if row_count == 1 else f"{noun}s"
 
     if wants_chart(question) or requested_chart_type(question):
-        return (
-            f"I found {row_count} matching {noun}. "
-            "I summarized the results in the visualization above; use the chart buttons to switch views or Table to see the rows."
-        )
+        return f"I found {row_count} matching {noun}."
 
-    return (
-        f"I found {row_count} matching {noun}. "
-        "I showed the results in the table instead of listing every row in the chat. "
-        "Use the chart buttons if you want to visualize the same data."
-    )
+    return f"I found {row_count} matching {noun}."
 
 
 @app.route("/api/Chat", methods=["GET"])

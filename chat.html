@@ -38,7 +38,7 @@
       padding: 24px 0 120px;
     }
     .row {
-      max-width: 900px;
+      max-width: min(1120px, calc(100vw - 40px));
       margin: 0 auto 18px;
       padding: 0 20px;
       display: flex;
@@ -61,6 +61,8 @@
       line-height: 1.55;
       white-space: pre-wrap;
       padding-top: 4px;
+      flex: 1;
+      min-width: 0;
     }
     .meta {
       margin-top: 10px;
@@ -192,6 +194,7 @@
       border-radius: 6px;
       max-width: 100%;
     }
+    .chart-wrap.hidden { display: none; }
     .chart-header {
       display: flex;
       align-items: center;
@@ -233,11 +236,14 @@
     .data-table-wrap {
       max-height: 320px;
       overflow: auto;
+      width: fit-content;
+      max-width: 100%;
     }
     .data-table-wrap.hidden { display: none; }
     .data-table-wrap.expanded {
       max-height: 70vh;
-      max-width: min(1100px, calc(100vw - 140px));
+      width: 100%;
+      max-width: 100%;
     }
     .mini-btn {
       background: #ffffff;
@@ -509,14 +515,13 @@
 
     function renderChartCanvas(chartId, isVisible, actionHtml) {
       return `
-        <div class="chart-wrap">
+        <div class="chart-wrap${isVisible ? "" : " hidden"}">
           <div class="chart-header">
             <div class="chart-label">${isVisible ? "Chart" : "Visualization"}</div>
           </div>
           <div class="chart-canvas-wrap${isVisible ? "" : " hidden"}">
             <canvas id="${chartId}"></canvas>
           </div>
-          ${actionHtml || ""}
         </div>
       `;
     }
@@ -723,6 +728,8 @@
       const wrap = row.querySelector(".chart-canvas-wrap");
       if (!spec || !wrap) return false;
 
+      const chartWrap = row.querySelector(".chart-wrap");
+      if (chartWrap) chartWrap.classList.remove("hidden");
       wrap.classList.remove("hidden");
       const options = row.querySelector(".chart-options");
       if (options) options.classList.remove("hidden");
@@ -743,6 +750,8 @@
       }
       const wrap = row.querySelector(".chart-canvas-wrap");
       if (wrap) wrap.classList.add("hidden");
+      const chartWrap = row.querySelector(".chart-wrap");
+      if (chartWrap) chartWrap.classList.add("hidden");
       const options = row.querySelector(".chart-options");
       if (options) options.classList.add("hidden");
       const table = row.querySelector(".data-table-wrap");
@@ -858,7 +867,7 @@
       const chartSpec = resolvedChartType ? buildChartSpec(rows, resolvedChartType) : null;
       const chartId = rows && rows.length > 0 ? `chart-${++chartCounter}` : null;
       const actionHtml = chartId ? renderResultActions(chartId, chartSpec?.type || null, rows, !!chartSpec) : "";
-      const chartHtml = chartId ? renderChartCanvas(chartId, !!chartSpec, actionHtml) : "";
+      const chartHtml = chartId ? renderChartCanvas(chartId, !!chartSpec) : "";
       const tableHtml = renderDataView(rows, !!chartSpec);
       const detailsHtml = renderDetails(query, rows);
 
@@ -866,6 +875,7 @@
         <div class="avatar">AI</div>
         <div class="bubble">
           ${chartHtml}
+          ${actionHtml}
           <div>${escapeHtml(answer)}</div>
           ${confirmHtml}
           ${tableHtml}
