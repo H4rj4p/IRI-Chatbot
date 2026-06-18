@@ -656,6 +656,7 @@ def parse_last_result(payload):
         "query": str(last_result.get("query") or ""),
         "chart_type": str(last_result.get("chart_type") or "table"),
         "data": clean_rows,
+        "memory": last_result.get("memory") if isinstance(last_result.get("memory"), dict) else {},
     }
 
 
@@ -674,6 +675,29 @@ def summarize_last_result(last_result):
         f"Previous rows shown: {len(rows)}",
         f"First rows: {json.dumps(preview, default=str)}",
     ]
+
+    memory = last_result.get("memory") if isinstance(last_result.get("memory"), dict) else {}
+    people = memory.get("people") if isinstance(memory.get("people"), list) else []
+    numeric_columns = memory.get("numeric_columns") if isinstance(memory.get("numeric_columns"), list) else []
+
+    if people:
+        parts.append(
+            "Previous people/customers: "
+            + json.dumps(people[:20], default=str)
+        )
+    if memory.get("label_column"):
+        parts.append(f"Previous chart label/x-axis column: {memory['label_column']}")
+    if memory.get("value_column"):
+        parts.append(f"Previous chart value/y-axis column: {memory['value_column']}")
+    if numeric_columns:
+        parts.append(f"Previous numeric metrics: {', '.join(str(col) for col in numeric_columns)}")
+    if last_result.get("chart_type"):
+        parts.append(f"Previous chart type: {last_result['chart_type']}")
+    if people:
+        parts.append(
+            "If the user says they, them, their, those customers, or those people, "
+            "treat that as referring to the previous people/customers listed above."
+        )
 
     return "\n".join(part for part in parts if part.strip())
 
@@ -1010,5 +1034,5 @@ def ask_question():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "7179"))
     host = os.environ.get("HOST", "0.0.0.0")
-    print(f"Starting IRI Chatbot on http://localhost:{port}/api/Chat")
+    print(f"Starting IRI AI on http://localhost:{port}/api/Chat")
     app.run(host=host, port=port, debug=False)

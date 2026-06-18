@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IRI Chatbot</title>
+  <title>IRI AI</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -38,7 +38,7 @@
       padding: 24px 0 120px;
     }
     .row {
-      max-width: 780px;
+      max-width: 900px;
       margin: 0 auto 18px;
       padding: 0 20px;
       display: flex;
@@ -204,12 +204,50 @@
       height: 260px;
       max-width: 520px;
     }
+    .chart-canvas-wrap.hidden { display: none; }
+    .result-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    .mini-btn {
+      background: #ffffff;
+      color: #111827;
+      border: 1px solid #d1d5db;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .mini-btn:hover,
+    .mini-btn.active {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #ffffff;
+    }
+    .mini-btn.secondary:hover {
+      background: #f3f4f6;
+      color: #111827;
+      border-color: #9ca3af;
+    }
+    details.result-details {
+      margin-top: 10px;
+      font-size: 0.78rem;
+      color: #374151;
+    }
+    details.result-details summary {
+      cursor: pointer;
+      color: #2563eb;
+      font-weight: 600;
+      list-style-position: inside;
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <header>
-    <h1>IRI Chatbot</h1>
+    <h1>IRI AI</h1>
     <span id="status">Checking database...</span>
   </header>
 
@@ -217,7 +255,7 @@
     <div class="row bot">
       <div class="avatar">AI</div>
       <div class="bubble" id="welcome">
-        Hi! I'm the IRI Chatbot. Ask questions about your connected database in plain English, and I'll answer in plain English too.
+        Hi! I'm IRI AI. Ask questions about your connected database in plain English, and I'll answer in plain English too.
         <div class="meta">Example: "How many rows are in customers?" — use your real table names from /api/GetDatabaseSchema</div>
       </div>
     </div>
@@ -247,7 +285,12 @@
       "#8b5cf6", "#14b8a6", "#ec4899", "#84cc16", "#06b6d4"
     ];
     const ID_COLS = new Set(["customerid", "rownumber", "id"]);
-    const PREFERRED_LABELS = ["geography", "gender", "surname"];
+    const PREFERRED_LABELS = ["surname", "geography", "gender", "customername", "name"];
+    const PREFERRED_VALUES = [
+      "estimatedsalary", "salary", "balance", "creditscore", "age",
+      "count", "total", "average", "avg", "male", "female"
+    ];
+    const chartInstances = new Map();
 
     function looksLikeJson(text) {
       if (!text) return false;
@@ -272,7 +315,7 @@
           status.className = "ok";
           const welcome = document.getElementById("welcome");
           if (welcome) {
-            welcome.innerHTML = `Hi! I'm the IRI Chatbot. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`;
+            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`;
           }
         } else {
           status.textContent = "DB not connected";
@@ -329,13 +372,43 @@
       });
     }
 
-    function getLabelColumn(row) {
-      const keys = Object.keys(row);
+    function scoreColumnName(name, preferred) {
+      const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const exactIndex = preferred.indexOf(normalized);
+      if (exactIndex >= 0) return 100 - exactIndex;
+
+      const containsIndex = preferred.findIndex(pref => normalized.includes(pref));
+      return containsIndex >= 0 ? 50 - containsIndex : 0;
+    }
+
+    function getLabelColumn(rows, valueCol) {
+      const row = rows[0];
+      const keys = Object.keys(row).filter(key => key !== valueCol && !ID_COLS.has(key.toLowerCase()));
       for (const pref of PREFERRED_LABELS) {
         const found = keys.find(k => k.toLowerCase() === pref);
         if (found) return found;
       }
-      return keys.find(k => typeof row[k] === "string" && !ID_COLS.has(k.toLowerCase())) || null;
+
+      const stringCols = keys.filter(k => rows.some(r => typeof r[k] === "string" && r[k] !== ""));
+      if (stringCols.length > 0) {
+        return stringCols
+          .map(col => ({ col, score: scoreColumnName(col, PREFERRED_LABELS) }))
+          .sort((a, b) => b.score - a.score)[0].col;
+      }
+
+      return keys[0] || null;
+    }
+
+    function getValueColumn(rows, labelCol) {
+      const numericCols = getNumericColumns(rows[0]).filter(col => col !== labelCol);
+      if (numericCols.length === 0) return null;
+
+      return numericCols
+        .map(col => ({
+          col,
+          score: scoreColumnName(col, PREFERRED_VALUES)
+        }))
+        .sort((a, b) => b.score - a.score)[0].col;
     }
 
     function userWantsChart(question) {
@@ -361,8 +434,8 @@
       if (chartType && chartType !== "table") return chartType;
 
       if (rows.length === 1 && getNumericColumns(rows[0]).length >= 2) return "bar";
-      if (rows.length >= 2 && rows.length <= 25 && getLabelColumn(rows[0]) && getNumericColumns(rows[0]).length > 0) {
-        const label = getLabelColumn(rows[0]).toLowerCase();
+      if (rows.length >= 2 && rows.length <= 25 && getLabelColumn(rows) && getNumericColumns(rows[0]).length > 0) {
+        const label = getLabelColumn(rows).toLowerCase();
         if (rows.length <= 6 && (label === "gender" || label === "geography")) return "pie";
         return "bar";
       }
@@ -386,11 +459,10 @@
         };
       }
 
-      const labelCol = getLabelColumn(rows[0]);
-      const nums = getNumericColumns(rows[0]);
-      if (!labelCol || nums.length === 0) return null;
+      const valueCol = getValueColumn(rows);
+      const labelCol = getLabelColumn(rows, valueCol);
+      if (!labelCol || !valueCol) return null;
 
-      const valueCol = nums[0];
       const labels = rows.map(r => formatCellValue(r[labelCol]));
       const values = rows.map(r => Number(r[valueCol]));
 
@@ -407,11 +479,11 @@
       };
     }
 
-    function renderChartCanvas(chartId) {
+    function renderChartCanvas(chartId, isVisible) {
       return `
         <div class="chart-wrap">
           <div class="chart-label">Chart</div>
-          <div class="chart-canvas-wrap">
+          <div class="chart-canvas-wrap${isVisible ? "" : " hidden"}">
             <canvas id="${chartId}"></canvas>
           </div>
         </div>
@@ -423,6 +495,9 @@
 
       const canvas = document.getElementById(canvasId);
       if (!canvas) return;
+
+      const existing = chartInstances.get(canvasId);
+      if (existing) existing.destroy();
 
       const colors = spec.labels.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]);
 
@@ -465,7 +540,7 @@
       };
 
       if (spec.type === "pie") {
-        new Chart(canvas, {
+        const chart = new Chart(canvas, {
           type: "pie",
           data: {
             labels: spec.labels,
@@ -478,11 +553,12 @@
           },
           options: commonOptions
         });
+        chartInstances.set(canvasId, chart);
         return;
       }
 
       const isLine = spec.type === "line";
-      new Chart(canvas, {
+      const chart = new Chart(canvas, {
         type: isLine ? "line" : "bar",
         data: {
           labels: spec.labels,
@@ -524,6 +600,7 @@
         },
         plugins: isLine ? [] : [barValueLabels]
       });
+      chartInstances.set(canvasId, chart);
     }
 
     function renderDataView(rows) {
@@ -553,14 +630,118 @@
       `;
     }
 
-    function renderSqlQuery(query) {
-      if (!query || query === "NA") return "";
+    function renderResultActions(chartId, activeType, rows) {
+      if (!rows || rows.length === 0) return "";
+
+      const chartTypes = ["bar", "line", "pie"];
+      const chartButtons = chartTypes.map(type => `
+        <button type="button" class="mini-btn chart-type ${activeType === type ? "active" : ""}"
+          data-action="chart" data-chart-type="${type}">
+          ${type[0].toUpperCase() + type.slice(1)}
+        </button>
+      `).join("");
+
       return `
-        <div class="sql-query">
-          <div class="sql-label">SQL query</div>
-          ${escapeHtml(query)}
+        <div class="result-actions" data-chart-id="${escapeAttr(chartId || "")}">
+          ${chartButtons}
+          <button type="button" class="mini-btn chart-type ${!activeType ? "active" : ""}" data-action="table">Table</button>
+          <button type="button" class="mini-btn secondary" data-action="csv">Export CSV</button>
+          <button type="button" class="mini-btn secondary" data-action="png">Export PNG</button>
         </div>
       `;
+    }
+
+    function renderDetails(query, rows) {
+      if ((!query || query === "NA") && (!rows || rows.length === 0)) return "";
+
+      const columns = rows && rows.length > 0 ? Object.keys(rows[0]) : [];
+      const rowCount = rows ? rows.length : 0;
+      const queryHtml = query && query !== "NA"
+        ? `<div class="sql-query"><div class="sql-label">SQL query</div>${escapeHtml(query)}</div>`
+        : "";
+      const columnHtml = columns.length > 0
+        ? `<div class="meta">Rows shown: ${rowCount}<br>Columns: ${escapeHtml(columns.join(", "))}</div>`
+        : "";
+
+      return `
+        <details class="result-details">
+          <summary>Details</summary>
+          ${columnHtml}
+          ${queryHtml}
+        </details>
+      `;
+    }
+
+    function setActiveChartButton(row, chartType) {
+      row.querySelectorAll(".chart-type").forEach(btn => {
+        const isActive = chartType
+          ? btn.dataset.chartType === chartType
+          : btn.dataset.action === "table";
+        btn.classList.toggle("active", isActive);
+      });
+    }
+
+    function showChart(row, chartId, rows, chartType) {
+      const spec = buildChartSpec(rows, chartType);
+      const wrap = row.querySelector(".chart-canvas-wrap");
+      if (!spec || !wrap) return false;
+
+      wrap.classList.remove("hidden");
+      mountChart(chartId, spec);
+      setActiveChartButton(row, spec.type);
+      return spec;
+    }
+
+    function hideChart(row, chartId) {
+      const existing = chartInstances.get(chartId);
+      if (existing) {
+        existing.destroy();
+        chartInstances.delete(chartId);
+      }
+      const wrap = row.querySelector(".chart-canvas-wrap");
+      if (wrap) wrap.classList.add("hidden");
+      setActiveChartButton(row, null);
+    }
+
+    function downloadFile(filename, content, type) {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportRowsAsCsv(rows) {
+      if (!rows || rows.length === 0) return;
+
+      const columns = Object.keys(rows[0]);
+      const escapeCsv = value => {
+        const text = formatCellValue(value);
+        return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      const lines = [
+        columns.map(escapeCsv).join(","),
+        ...rows.map(row => columns.map(col => escapeCsv(row[col])).join(","))
+      ];
+
+      downloadFile("iri-ai-results.csv", lines.join("\n"), "text/csv;charset=utf-8");
+    }
+
+    function exportChartAsPng(chartId) {
+      const chart = chartInstances.get(chartId);
+      if (!chart) return false;
+
+      const link = document.createElement("a");
+      link.href = chart.toBase64Image();
+      link.download = "iri-ai-chart.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return true;
     }
 
     function renderConfirmButtons(candidates, originalQuestion) {
@@ -583,11 +764,41 @@
       return `<div class="confirm-names">${buttons}</div>`;
     }
 
+    function buildResultMemory(rows, query, question, chartType) {
+      const safeRows = rows || [];
+      const columns = safeRows.length > 0 ? Object.keys(safeRows[0]) : [];
+      const valueCol = safeRows.length > 0 ? getValueColumn(safeRows) : null;
+      const labelCol = safeRows.length > 0 ? getLabelColumn(safeRows, valueCol) : null;
+      const numericCols = safeRows.length > 0 ? getNumericColumns(safeRows[0]) : [];
+
+      const customerIdCol = columns.find(col => col.toLowerCase() === "customerid");
+      const surnameCol = columns.find(col => col.toLowerCase() === "surname");
+      const people = safeRows.slice(0, 20)
+        .map(row => ({
+          customer_id: customerIdCol ? row[customerIdCol] : null,
+          surname: surnameCol ? row[surnameCol] : null
+        }))
+        .filter(person => person.customer_id !== null || person.surname);
+
+      return {
+        question,
+        query,
+        chart_type: chartType || "table",
+        memory: {
+          people,
+          columns,
+          numeric_columns: numericCols,
+          label_column: labelCol,
+          value_column: valueCol,
+          row_count: safeRows.length
+        }
+      };
+    }
+
     function addBotResponse(answer, rows, query, options = {}) {
       const row = document.createElement("div");
       row.className = "row bot";
       const tableHtml = renderDataView(rows);
-      const sqlHtml = renderSqlQuery(query);
       const confirmHtml = options.needsConfirmation
         ? renderConfirmButtons(options.candidates, options.originalQuestion)
         : "";
@@ -596,17 +807,20 @@
         ? null
         : resolveChartType(rows, options.chartType, options.question || options.originalQuestion || "");
       const chartSpec = resolvedChartType ? buildChartSpec(rows, resolvedChartType) : null;
-      const chartId = chartSpec ? `chart-${++chartCounter}` : null;
-      const chartHtml = chartSpec ? renderChartCanvas(chartId) : "";
+      const chartId = rows && rows.length > 0 ? `chart-${++chartCounter}` : null;
+      const chartHtml = chartId ? renderChartCanvas(chartId, !!chartSpec) : "";
+      const actionHtml = renderResultActions(chartId, chartSpec?.type || null, rows);
+      const detailsHtml = renderDetails(query, rows);
 
       row.innerHTML = `
         <div class="avatar">AI</div>
         <div class="bubble">
           <div>${escapeHtml(answer)}</div>
           ${confirmHtml}
+          ${actionHtml}
           ${chartHtml}
           ${tableHtml}
-          ${sqlHtml}
+          ${detailsHtml}
         </div>
       `;
 
@@ -618,15 +832,54 @@
 
       messages.appendChild(row);
       if (chartSpec && chartId) mountChart(chartId, chartSpec);
+
+      row.querySelectorAll("[data-action]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const action = btn.dataset.action;
+
+          if (action === "chart") {
+            const spec = showChart(row, chartId, rows, btn.dataset.chartType);
+            if (spec && lastResultContext) lastResultContext.chart_type = spec.type;
+            return;
+          }
+
+          if (action === "table") {
+            hideChart(row, chartId);
+            if (lastResultContext) lastResultContext.chart_type = "table";
+            return;
+          }
+
+          if (action === "csv") {
+            exportRowsAsCsv(rows);
+            return;
+          }
+
+          if (action === "png") {
+            let exported = exportChartAsPng(chartId);
+            if (!exported) {
+              const spec = showChart(row, chartId, rows, "bar");
+              exported = !!spec && exportChartAsPng(chartId);
+            }
+          }
+        });
+      });
+
       messages.scrollTop = messages.scrollHeight;
 
       if (!options.needsConfirmation && rows && rows.length > 0 && query && query !== "NA") {
+        const context = buildResultMemory(
+          rows,
+          query,
+          options.question || options.originalQuestion || lastUserQuestion,
+          chartSpec?.type || options.chartType || resolvedChartType || "table"
+        );
         lastResultContext = {
-          question: options.question || options.originalQuestion || lastUserQuestion,
+          question: context.question,
           answer,
           query,
           data: rows.slice(0, 100),
-          chart_type: options.chartType || resolvedChartType || "table"
+          chart_type: context.chart_type,
+          memory: context.memory
         };
       }
 
