@@ -168,6 +168,7 @@
       outline: none;
       min-height: 24px;
       max-height: 160px;
+      overflow-y: auto;
     }
     button {
       border: none;
@@ -663,7 +664,7 @@
     function renderResultActions(chartId, activeType, rows, isChartVisible) {
       if (!rows || rows.length === 0) return "";
 
-      const chartTypes = ["bar", "pie"];
+      const chartTypes = ["bar", "line", "pie"];
       const chartButtons = chartTypes.map(type => `
         <button type="button" class="mini-btn chart-type ${activeType === type ? "active" : ""}"
           data-action="chart" data-chart-type="${type}">
@@ -960,6 +961,11 @@
       return escapeHtml(str).replace(/`/g, "&#96;");
     }
 
+    function resizeInput() {
+      input.style.height = "auto";
+      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+    }
+
     async function sendQuestion(text, confirmedSurname, confirmedCustomerId) {
       const history = chatHistory.slice(-8);
       send.disabled = true;
@@ -1036,10 +1042,12 @@
       lastUserQuestion = text;
       addUser(text);
       input.value = "";
+      resizeInput();
       await sendQuestion(text);
     }
 
     send.addEventListener("click", askQuestion);
+    input.addEventListener("input", resizeInput);
     input.addEventListener("keydown", e => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -1048,6 +1056,7 @@
     });
 
     checkStatus();
+    resizeInput();
     input.focus();
   </script>
 </body>
