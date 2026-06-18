@@ -247,7 +247,7 @@ COMPARISON_PATTERN = re.compile(
 )
 LISTING_PATTERN = re.compile(
     r"\b(top|bottom|first|last|highest|lowest|most|least|all|list|show|give|"
-    r"rank|ranking|customers|people|rows|salar(?:y|ies)|balances?)\b",
+    r"rank|ranking|sort|order|customers|people|rows|salar(?:y|ies)|balances?)\b",
     re.IGNORECASE,
 )
 
@@ -565,7 +565,16 @@ def should_confirm(candidates, question, confirmed_customer_id):
         if surname:
             surname_counts[surname] = surname_counts.get(surname, 0) + 1
 
-    return any(count > 1 for count in surname_counts.values())
+    duplicate_surnames = [
+        surname
+        for surname, count in surname_counts.items()
+        if count > 1
+    ]
+    question_text = question or ""
+    return any(
+        re.search(rf"\b{re.escape(surname)}\b", question_text, re.IGNORECASE)
+        for surname in duplicate_surnames
+    )
 
 
 def wants_chart(question):
