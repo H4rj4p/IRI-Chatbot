@@ -832,6 +832,9 @@ def generate_sql(question, history, customers_table, confirmed_surname, confirme
 
 def generate_answer(question, history, results, confirmed_surname, confirmed_customer_id):
     enhanced_question = enhance_for_answer(question)
+    if is_large_result_question(question, results):
+        return build_compact_result_answer(question, results), recommend_chart(results, "table", question)
+
     prompt_question = format_for_prompt(
         enhanced_question,
         history,
@@ -842,11 +845,42 @@ def generate_answer(question, history, results, confirmed_surname, confirmed_cus
         system_prompt=(
             "You are a helpful data analyst. Summarize query results as a clear, "
             "concise answer. Include notable insights. Your response will be shown "
-            "in a web chat interface."
+            "in a web chat interface. Do not list rows one by one, do not use markdown "
+            "tables, and do not repeat every field from the data. The UI already shows "
+            "the rows in a table/chart, so keep the answer to a few sentences."
         ),
         user_prompt=f"{prompt_question}\n\nData: {json.dumps(results, default=str)}",
     )
     return raw_answer, recommend_chart(results, "table", question)
+
+
+def is_large_result_question(question, results):
+    if len(results) >= 8:
+        return True
+    return bool(results and LISTING_PATTERN.search(question or ""))
+
+
+def build_compact_result_answer(question, results):
+    row_count = len(results)
+    first_row = results[0] if results else {}
+    has_customer_fields = any(
+        key.lower() in {"customerid", "surname"}
+        for key in first_row.keys()
+    )
+    noun = "customer" if has_customer_fields else "row"
+    noun = noun if row_count == 1 else f"{noun}s"
+
+    if wants_chart(question) or requested_chart_type(question):
+        return (
+            f"I found {row_count} matching {noun}. "
+            "I summarized the results in the visualization above; use the chart buttons to switch views or Table to see the rows."
+        )
+
+    return (
+        f"I found {row_count} matching {noun}. "
+        "I showed the results in the table instead of listing every row in the chat. "
+        "Use the chart buttons if you want to visualize the same data."
+    )
 
 
 @app.route("/api/Chat", methods=["GET"])

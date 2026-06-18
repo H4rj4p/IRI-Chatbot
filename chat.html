@@ -833,8 +833,8 @@
         : resolveChartType(rows, options.chartType, options.question || options.originalQuestion || "");
       const chartSpec = resolvedChartType ? buildChartSpec(rows, resolvedChartType) : null;
       const chartId = rows && rows.length > 0 ? `chart-${++chartCounter}` : null;
-      const actionHtml = chartSpec ? renderResultActions(chartId, chartSpec.type, rows) : "";
-      const chartHtml = chartSpec && chartId ? renderChartCanvas(chartId, true, actionHtml) : "";
+      const actionHtml = chartId ? renderResultActions(chartId, chartSpec?.type || null, rows) : "";
+      const chartHtml = chartId ? renderChartCanvas(chartId, !!chartSpec, actionHtml) : "";
       const tableHtml = renderDataView(rows, !!chartSpec);
       const detailsHtml = renderDetails(query, rows);
 
