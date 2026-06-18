@@ -675,8 +675,9 @@
       return `
         <div class="result-actions" data-chart-id="${escapeAttr(chartId || "")}">
           <div class="chart-type-actions primary-actions">
-            <button type="button" class="mini-btn ${isChartVisible ? "active" : ""}" data-action="show-chart">Show charts</button>
-            <button type="button" class="mini-btn" data-action="hide-chart">Hide charts</button>
+            <button type="button" class="mini-btn ${isChartVisible ? "active" : ""}" data-action="toggle-chart">
+              ${isChartVisible ? "Hide charts" : "Show charts"}
+            </button>
           </div>
           <div class="chart-type-actions chart-options${isChartVisible ? "" : " hidden"}">
             ${chartButtons}
@@ -730,8 +731,11 @@
       if (options) options.classList.remove("hidden");
       mountChart(chartId, spec);
       setActiveChartButton(row, spec.type);
-      const showButton = row.querySelector('[data-action="show-chart"]');
-      if (showButton) showButton.classList.add("active");
+      const toggleButton = row.querySelector('[data-action="toggle-chart"]');
+      if (toggleButton) {
+        toggleButton.classList.add("active");
+        toggleButton.textContent = "Hide charts";
+      }
       const table = row.querySelector(".data-table-wrap");
       if (table) table.classList.add("hidden");
       return spec;
@@ -751,8 +755,11 @@
       if (options) options.classList.add("hidden");
       const table = row.querySelector(".data-table-wrap");
       if (table) table.classList.remove("hidden");
-      const showButton = row.querySelector('[data-action="show-chart"]');
-      if (showButton) showButton.classList.remove("active");
+      const toggleButton = row.querySelector('[data-action="toggle-chart"]');
+      if (toggleButton) {
+        toggleButton.classList.remove("active");
+        toggleButton.textContent = "Show charts";
+      }
       setActiveChartButton(row, null);
     }
 
@@ -877,21 +884,22 @@
         btn.addEventListener("click", () => {
           const action = btn.dataset.action;
 
-          if (action === "show-chart") {
-            const spec = showChart(row, chartId, rows, chartSpec?.type || "bar");
-            if (spec && lastResultContext) lastResultContext.chart_type = spec.type;
+          if (action === "toggle-chart") {
+            const chartWrap = row.querySelector(".chart-wrap");
+            const isVisible = chartWrap && !chartWrap.classList.contains("hidden");
+            if (isVisible) {
+              hideChart(row, chartId);
+              if (lastResultContext) lastResultContext.chart_type = "table";
+            } else {
+              const spec = showChart(row, chartId, rows, chartSpec?.type || "bar");
+              if (spec && lastResultContext) lastResultContext.chart_type = spec.type;
+            }
             return;
           }
 
           if (action === "chart") {
             const spec = showChart(row, chartId, rows, btn.dataset.chartType);
             if (spec && lastResultContext) lastResultContext.chart_type = spec.type;
-            return;
-          }
-
-          if (action === "hide-chart") {
-            hideChart(row, chartId);
-            if (lastResultContext) lastResultContext.chart_type = "table";
             return;
           }
 
