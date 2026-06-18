@@ -682,7 +682,7 @@
           <div class="chart-type-actions chart-options${isChartVisible ? "" : " hidden"}">
             ${chartButtons}
           </div>
-          <div class="export-actions">
+          <div class="export-actions${isChartVisible ? "" : " hidden"}">
             <button type="button" class="mini-btn secondary" data-action="csv">Export CSV</button>
           </div>
         </div>
@@ -729,6 +729,8 @@
       wrap.classList.remove("hidden");
       const options = row.querySelector(".chart-options");
       if (options) options.classList.remove("hidden");
+      const exports = row.querySelector(".export-actions");
+      if (exports) exports.classList.remove("hidden");
       mountChart(chartId, spec);
       setActiveChartButton(row, spec.type);
       const toggleButton = row.querySelector('[data-action="toggle-chart"]');
@@ -753,6 +755,8 @@
       if (chartWrap) chartWrap.classList.add("hidden");
       const options = row.querySelector(".chart-options");
       if (options) options.classList.add("hidden");
+      const exports = row.querySelector(".export-actions");
+      if (exports) exports.classList.add("hidden");
       const table = row.querySelector(".data-table-wrap");
       if (table) table.classList.remove("hidden");
       const toggleButton = row.querySelector('[data-action="toggle-chart"]');
@@ -854,19 +858,19 @@
         : resolveChartType(rows, options.chartType, options.question || options.originalQuestion || "");
       const chartSpec = resolvedChartType ? buildChartSpec(rows, resolvedChartType) : null;
       const chartId = rows && rows.length > 0 ? `chart-${++chartCounter}` : null;
-      const actionHtml = chartId ? renderResultActions(chartId, chartSpec?.type || null, rows, !!chartSpec) : "";
-      const chartHtml = chartId ? renderChartCanvas(chartId, !!chartSpec) : "";
-      const tableHtml = renderDataView(rows, !!chartSpec);
+      const actionHtml = chartId ? renderResultActions(chartId, chartSpec?.type || null, rows, false) : "";
+      const chartHtml = chartId ? renderChartCanvas(chartId, false) : "";
+      const tableHtml = renderDataView(rows, false);
       const detailsHtml = renderDetails(query, rows);
 
       row.innerHTML = `
         <div class="avatar">AI</div>
         <div class="bubble">
-          ${chartHtml}
+          ${tableHtml}
           ${actionHtml}
+          ${chartHtml}
           <div>${escapeHtml(answer)}</div>
           ${confirmHtml}
-          ${tableHtml}
           ${detailsHtml}
         </div>
       `;
@@ -878,7 +882,6 @@
       });
 
       messages.appendChild(row);
-      if (chartSpec && chartId) mountChart(chartId, chartSpec);
 
       row.querySelectorAll("[data-action]").forEach(btn => {
         btn.addEventListener("click", () => {
