@@ -738,8 +738,6 @@
         toggleButton.classList.add("active");
         toggleButton.textContent = "Hide charts";
       }
-      const table = row.querySelector(".data-table-wrap");
-      if (table) table.classList.add("hidden");
       return spec;
     }
 
@@ -866,11 +864,11 @@
       row.innerHTML = `
         <div class="avatar">AI</div>
         <div class="bubble">
+          <div>${escapeHtml(answer)}</div>
+          ${confirmHtml}
           ${tableHtml}
           ${actionHtml}
           ${chartHtml}
-          <div>${escapeHtml(answer)}</div>
-          ${confirmHtml}
           ${detailsHtml}
         </div>
       `;
