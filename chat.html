@@ -240,11 +240,6 @@
       max-width: 100%;
     }
     .data-table-wrap.hidden { display: none; }
-    .data-table-wrap.expanded {
-      max-height: 70vh;
-      width: 100%;
-      max-width: 100%;
-    }
     .mini-btn {
       background: #ffffff;
       color: #111827;
@@ -681,7 +676,7 @@
         <div class="result-actions" data-chart-id="${escapeAttr(chartId || "")}">
           <div class="chart-type-actions primary-actions">
             <button type="button" class="mini-btn ${isChartVisible ? "active" : ""}" data-action="show-chart">Show charts</button>
-            <button type="button" class="mini-btn" data-action="expand-table">Enlarge table</button>
+            <button type="button" class="mini-btn" data-action="hide-chart">Hide charts</button>
           </div>
           <div class="chart-type-actions chart-options${isChartVisible ? "" : " hidden"}">
             ${chartButtons}
@@ -759,20 +754,6 @@
       const showButton = row.querySelector('[data-action="show-chart"]');
       if (showButton) showButton.classList.remove("active");
       setActiveChartButton(row, null);
-    }
-
-    function toggleTableExpanded(row, chartId) {
-      hideChart(row, chartId);
-      const table = row.querySelector(".data-table-wrap");
-      if (!table) return;
-
-      table.classList.toggle("expanded");
-      const button = row.querySelector('[data-action="expand-table"]');
-      if (button) {
-        button.textContent = table.classList.contains("expanded")
-          ? "Shrink table"
-          : "Enlarge table";
-      }
     }
 
     function downloadFile(filename, content, type) {
@@ -908,8 +889,8 @@
             return;
           }
 
-          if (action === "expand-table") {
-            toggleTableExpanded(row, chartId);
+          if (action === "hide-chart") {
+            hideChart(row, chartId);
             if (lastResultContext) lastResultContext.chart_type = "table";
             return;
           }
