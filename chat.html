@@ -232,6 +232,7 @@
     .primary-actions { justify-content: flex-start; }
     .chart-options { justify-content: center; }
     .export-actions { justify-content: flex-end; }
+    .closed-chart-actions.hidden { display: none; }
     .chart-type-actions.hidden { display: none; }
     .data-table-wrap {
       max-height: 320px;
@@ -517,6 +518,7 @@
           <div class="chart-canvas-wrap${isVisible ? "" : " hidden"}">
             <canvas id="${chartId}"></canvas>
           </div>
+          ${actionHtml || ""}
         </div>
       `;
     }
@@ -661,7 +663,19 @@
       `;
     }
 
-    function renderResultActions(chartId, activeType, rows, isChartVisible) {
+    function renderClosedChartToggle(chartId, rows) {
+      if (!rows || rows.length === 0) return "";
+
+      return `
+        <div class="result-actions closed-chart-actions" data-chart-id="${escapeAttr(chartId || "")}">
+          <div class="chart-type-actions primary-actions">
+            <button type="button" class="mini-btn" data-action="toggle-chart">Show charts</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderChartFooter(chartId, activeType, rows) {
       if (!rows || rows.length === 0) return "";
 
       const chartTypes = ["bar", "line", "pie"];
@@ -675,14 +689,12 @@
       return `
         <div class="result-actions" data-chart-id="${escapeAttr(chartId || "")}">
           <div class="chart-type-actions primary-actions">
-            <button type="button" class="mini-btn ${isChartVisible ? "active" : ""}" data-action="toggle-chart">
-              ${isChartVisible ? "Hide charts" : "Show charts"}
-            </button>
+            <button type="button" class="mini-btn active" data-action="toggle-chart">Hide charts</button>
           </div>
-          <div class="chart-type-actions chart-options${isChartVisible ? "" : " hidden"}">
+          <div class="chart-type-actions chart-options">
             ${chartButtons}
           </div>
-          <div class="export-actions${isChartVisible ? "" : " hidden"}">
+          <div class="export-actions">
             <button type="button" class="mini-btn secondary" data-action="csv">Export CSV</button>
           </div>
         </div>
@@ -727,17 +739,10 @@
       const chartWrap = row.querySelector(".chart-wrap");
       if (chartWrap) chartWrap.classList.remove("hidden");
       wrap.classList.remove("hidden");
-      const options = row.querySelector(".chart-options");
-      if (options) options.classList.remove("hidden");
-      const exports = row.querySelector(".export-actions");
-      if (exports) exports.classList.remove("hidden");
+      const closedActions = row.querySelector(".closed-chart-actions");
+      if (closedActions) closedActions.classList.add("hidden");
       mountChart(chartId, spec);
       setActiveChartButton(row, spec.type);
-      const toggleButton = row.querySelector('[data-action="toggle-chart"]');
-      if (toggleButton) {
-        toggleButton.classList.add("active");
-        toggleButton.textContent = "Hide charts";
-      }
       return spec;
     }
 
@@ -751,17 +756,10 @@
       if (wrap) wrap.classList.add("hidden");
       const chartWrap = row.querySelector(".chart-wrap");
       if (chartWrap) chartWrap.classList.add("hidden");
-      const options = row.querySelector(".chart-options");
-      if (options) options.classList.add("hidden");
-      const exports = row.querySelector(".export-actions");
-      if (exports) exports.classList.add("hidden");
+      const closedActions = row.querySelector(".closed-chart-actions");
+      if (closedActions) closedActions.classList.remove("hidden");
       const table = row.querySelector(".data-table-wrap");
       if (table) table.classList.remove("hidden");
-      const toggleButton = row.querySelector('[data-action="toggle-chart"]');
-      if (toggleButton) {
-        toggleButton.classList.remove("active");
-        toggleButton.textContent = "Show charts";
-      }
       setActiveChartButton(row, null);
     }
 
@@ -856,8 +854,9 @@
         : resolveChartType(rows, options.chartType, options.question || options.originalQuestion || "");
       const chartSpec = resolvedChartType ? buildChartSpec(rows, resolvedChartType) : null;
       const chartId = rows && rows.length > 0 ? `chart-${++chartCounter}` : null;
-      const actionHtml = chartId ? renderResultActions(chartId, chartSpec?.type || null, rows, false) : "";
-      const chartHtml = chartId ? renderChartCanvas(chartId, false) : "";
+      const closedActionHtml = chartId ? renderClosedChartToggle(chartId, rows) : "";
+      const chartFooterHtml = chartId ? renderChartFooter(chartId, chartSpec?.type || null, rows) : "";
+      const chartHtml = chartId ? renderChartCanvas(chartId, false, chartFooterHtml) : "";
       const tableHtml = renderDataView(rows, false);
       const detailsHtml = renderDetails(query, rows);
 
@@ -867,8 +866,8 @@
           <div>${escapeHtml(answer)}</div>
           ${confirmHtml}
           ${tableHtml}
+          ${closedActionHtml}
           ${chartHtml}
-          ${actionHtml}
           ${detailsHtml}
         </div>
       `;
