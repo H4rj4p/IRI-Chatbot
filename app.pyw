@@ -245,6 +245,11 @@ COMPARISON_PATTERN = re.compile(
     r"\b(or|vs|versus|compare|between|compared\s+to)\b",
     re.IGNORECASE,
 )
+LISTING_PATTERN = re.compile(
+    r"\b(top|bottom|first|last|highest|lowest|most|least|all|list|show|give|"
+    r"rank|ranking|customers|people|rows|salar(?:y|ies)|balances?)\b",
+    re.IGNORECASE,
+)
 
 ID_COLUMNS = {"customerid", "rownumber", "id"}
 CATEGORY_COLUMNS = {"geography", "gender", "surname"}
@@ -551,7 +556,16 @@ def should_confirm(candidates, question, confirmed_customer_id):
         return False
     if COMPARISON_PATTERN.search(question or ""):
         return False
-    return True
+    if LISTING_PATTERN.search(question or ""):
+        return False
+
+    surname_counts = {}
+    for candidate in candidates:
+        surname = str(candidate.get("surname") or "").strip().lower()
+        if surname:
+            surname_counts[surname] = surname_counts.get(surname, 0) + 1
+
+    return any(count > 1 for count in surname_counts.values())
 
 
 def wants_chart(question):
@@ -570,7 +584,7 @@ def requested_chart_type(question):
 
 
 def is_chart_followup(question):
-    if not wants_chart(question):
+    if not wants_chart(question) and requested_chart_type(question) is None:
         return False
 
     tokens = re.findall(r"[a-z0-9]+", (question or "").lower())

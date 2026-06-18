@@ -8,29 +8,30 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #343541;
-      color: #ececf1;
+      background: #f7f7f8;
+      color: #111827;
       height: 100vh;
       display: flex;
       flex-direction: column;
     }
     header {
       padding: 14px 20px;
-      border-bottom: 1px solid #565869;
+      border-bottom: 1px solid #d1d5db;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #202123;
+      background: #ffffff;
     }
     header h1 { font-size: 1rem; font-weight: 600; }
     #status {
       font-size: 0.8rem;
       padding: 4px 10px;
       border-radius: 999px;
-      background: #565869;
+      background: #e5e7eb;
+      color: #374151;
     }
-    #status.ok { background: #1a7f37; }
-    #status.bad { background: #a40e26; }
+    #status.ok { background: #dcfce7; color: #166534; }
+    #status.bad { background: #fee2e2; color: #991b1b; }
     #messages {
       flex: 1;
       overflow-y: auto;
@@ -54,8 +55,8 @@
       font-weight: 700;
       flex-shrink: 0;
     }
-    .row.user .avatar { background: #5436da; }
-    .row.bot .avatar { background: #19c37d; color: #111; }
+    .row.user .avatar { background: #2563eb; color: #ffffff; }
+    .row.bot .avatar { background: #10b981; color: #ffffff; }
     .bubble {
       line-height: 1.55;
       white-space: pre-wrap;
@@ -64,15 +65,15 @@
     .meta {
       margin-top: 10px;
       font-size: 0.75rem;
-      color: #acacbe;
+      color: #6b7280;
     }
     .sql-query {
       margin-top: 10px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.72rem;
-      color: #c5c5d2;
-      background: #2a2b32;
-      border: 1px solid #565869;
+      color: #111827;
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
       border-radius: 4px;
       padding: 6px 8px;
       white-space: pre-wrap;
@@ -80,7 +81,7 @@
     }
     .sql-label {
       font-size: 0.68rem;
-      color: #8e8ea0;
+      color: #6b7280;
       text-transform: uppercase;
       letter-spacing: 0.04em;
       margin-bottom: 4px;
@@ -90,9 +91,9 @@
       display: inline-block;
       max-width: 100%;
       overflow-x: auto;
-      border: 1px solid #565869;
+      border: 1px solid #d1d5db;
       border-radius: 2px;
-      background: #2a2b32;
+      background: #ffffff;
     }
     .data-table {
       border-collapse: collapse;
@@ -103,18 +104,18 @@
     .data-table td {
       padding: 2px 8px;
       text-align: left;
-      border: 1px solid #565869;
+      border: 1px solid #d1d5db;
       white-space: nowrap;
       line-height: 1.35;
     }
     .data-table th {
-      background: #343541;
-      color: #acacbe;
+      background: #f3f4f6;
+      color: #374151;
       font-size: 0.72rem;
       font-weight: 600;
     }
     .data-table tbody tr:hover td {
-      background: rgba(255, 255, 255, 0.03);
+      background: #f9fafb;
     }
     .confirm-names {
       display: flex;
@@ -123,9 +124,9 @@
       margin-top: 10px;
     }
     .name-pick {
-      background: #40414f;
-      color: #ececf1;
-      border: 1px solid #565869;
+      background: #ffffff;
+      color: #111827;
+      border: 1px solid #d1d5db;
       border-radius: 6px;
       padding: 5px 10px;
       font-size: 0.78rem;
@@ -133,15 +134,16 @@
       cursor: pointer;
     }
     .name-pick:hover {
-      background: #5436da;
-      border-color: #5436da;
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #ffffff;
     }
     .composer-wrap {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: linear-gradient(transparent, #343541 30%);
+      background: linear-gradient(transparent, #f7f7f8 30%);
       padding: 16px 20px 24px;
     }
     .composer {
@@ -149,8 +151,8 @@
       margin: 0 auto;
       display: flex;
       gap: 10px;
-      background: #40414f;
-      border: 1px solid #565869;
+      background: #ffffff;
+      border: 1px solid #d1d5db;
       border-radius: 14px;
       padding: 10px 12px;
     }
@@ -159,7 +161,7 @@
       resize: none;
       border: none;
       background: transparent;
-      color: #ececf1;
+      color: #111827;
       font: inherit;
       outline: none;
       min-height: 24px;
@@ -167,8 +169,8 @@
     }
     button {
       border: none;
-      background: #19c37d;
-      color: #111;
+      background: #2563eb;
+      color: #ffffff;
       font-weight: 600;
       border-radius: 10px;
       padding: 0 16px;
@@ -179,20 +181,20 @@
       max-width: 780px;
       margin: 0 auto 8px;
       font-size: 0.8rem;
-      color: #acacbe;
+      color: #6b7280;
       text-align: center;
     }
     .chart-wrap {
       margin-top: 12px;
       padding: 12px;
-      background: #2a2b32;
-      border: 1px solid #565869;
+      background: #ffffff;
+      border: 1px solid #d1d5db;
       border-radius: 6px;
       max-width: 100%;
     }
     .chart-label {
       font-size: 0.68rem;
-      color: #8e8ea0;
+      color: #6b7280;
       text-transform: uppercase;
       letter-spacing: 0.04em;
       margin-bottom: 8px;
@@ -344,10 +346,10 @@
     }
 
     function resolveChartType(rows, chartType, question) {
-      if (!userWantsChart(question)) return null;
+      const requested = requestedChartType(question);
+      if (!requested && !userWantsChart(question)) return null;
       if (!rows || rows.length === 0) return null;
 
-      const requested = requestedChartType(question);
       if (requested) return requested;
 
       if (chartType && chartType !== "table") return chartType;
@@ -420,7 +422,7 @@
         maintainAspectRatio: false,
         plugins: {
           legend: {
-            labels: { color: "#ececf1", font: { size: 11 } }
+            labels: { color: "#111827", font: { size: 11 } }
           }
         }
       };
@@ -433,7 +435,7 @@
             datasets: [{
               data: spec.values,
               backgroundColor: colors,
-              borderColor: "#343541",
+              borderColor: "#ffffff",
               borderWidth: 1
             }]
           },
@@ -461,12 +463,12 @@
           ...commonOptions,
           scales: {
             x: {
-              ticks: { color: "#acacbe", font: { size: 10 } },
-              grid: { color: "rgba(86, 88, 105, 0.35)" }
+              ticks: { color: "#374151", font: { size: 10 } },
+              grid: { color: "rgba(156, 163, 175, 0.35)" }
             },
             y: {
-              ticks: { color: "#acacbe", font: { size: 10 } },
-              grid: { color: "rgba(86, 88, 105, 0.35)" }
+              ticks: { color: "#374151", font: { size: 10 } },
+              grid: { color: "rgba(156, 163, 175, 0.35)" }
             }
           }
         }
