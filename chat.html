@@ -241,6 +241,24 @@
       max-width: 100%;
     }
     .data-table-wrap.hidden { display: none; }
+    .table-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 8px;
+      max-width: 100%;
+    }
+    .table-count {
+      color: #6b7280;
+      font-size: 0.78rem;
+    }
+    .table-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
     .mini-btn {
       background: #ffffff;
       color: #111827;
@@ -315,6 +333,7 @@
       "#8b5cf6", "#14b8a6", "#ec4899", "#84cc16", "#06b6d4"
     ];
     const ID_COLS = new Set(["customerid", "rownumber", "id"]);
+    const TABLE_PAGE_SIZE = 100;
     const PREFERRED_LABELS = ["surname", "geography", "gender", "customername", "name"];
     const PREFERRED_VALUES = [
       "estimatedsalary", "salary", "balance", "creditscore", "age",
@@ -636,6 +655,15 @@
       chartInstances.set(canvasId, chart);
     }
 
+    function renderTableRows(rows, columns, visibleCount) {
+      return rows.slice(0, visibleCount).map(row => {
+        const cells = columns.map(col =>
+          `<td>${escapeHtml(formatCellValue(row[col]))}</td>`
+        ).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+    }
+
     function renderDataView(rows, isHidden = false) {
       if (!rows || rows.length === 0) return "";
 
@@ -646,19 +674,27 @@
         `<th>${escapeHtml(formatColumnLabel(col))}</th>`
       ).join("");
 
-      const body = rows.map(row => {
-        const cells = columns.map(col =>
-          `<td>${escapeHtml(formatCellValue(row[col]))}</td>`
-        ).join("");
-        return `<tr>${cells}</tr>`;
-      }).join("");
+      const visibleCount = Math.min(TABLE_PAGE_SIZE, rows.length);
+      const body = renderTableRows(rows, columns, visibleCount);
+      const loadMoreHtml = rows.length > visibleCount
+        ? `<button type="button" class="mini-btn" data-action="load-more">Load more</button>`
+        : "";
 
       return `
-        <div class="data-table-wrap${isHidden ? " hidden" : ""}">
-          <table class="data-table">
-            <thead><tr>${header}</tr></thead>
-            <tbody>${body}</tbody>
-          </table>
+        <div class="table-result${isHidden ? " hidden" : ""}" data-visible-count="${visibleCount}">
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead><tr>${header}</tr></thead>
+              <tbody>${body}</tbody>
+            </table>
+          </div>
+          <div class="table-footer">
+            <span class="table-count">Showing ${visibleCount} of ${rows.length} rows</span>
+            <div class="table-actions">
+              ${loadMoreHtml}
+              <button type="button" class="mini-btn secondary" data-action="csv">Export CSV</button>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -693,9 +729,6 @@
           </div>
           <div class="chart-type-actions chart-options">
             ${chartButtons}
-          </div>
-          <div class="export-actions">
-            <button type="button" class="mini-btn secondary" data-action="csv">Export CSV</button>
           </div>
         </div>
       `;
@@ -758,7 +791,7 @@
       if (chartWrap) chartWrap.classList.add("hidden");
       const closedActions = row.querySelector(".closed-chart-actions");
       if (closedActions) closedActions.classList.remove("hidden");
-      const table = row.querySelector(".data-table-wrap");
+      const table = row.querySelector(".table-result");
       if (table) table.classList.remove("hidden");
       setActiveChartButton(row, null);
     }
@@ -789,6 +822,25 @@
       ];
 
       downloadFile("iri-ai-results.csv", lines.join("\n"), "text/csv;charset=utf-8");
+    }
+
+    function loadMoreRows(row, rows) {
+      const tableResult = row.querySelector(".table-result");
+      const tbody = tableResult?.querySelector("tbody");
+      const countEl = tableResult?.querySelector(".table-count");
+      const button = tableResult?.querySelector('[data-action="load-more"]');
+      if (!tableResult || !tbody || !countEl) return;
+
+      const columns = rows && rows.length > 0 ? Object.keys(rows[0]) : [];
+      const current = Number(tableResult.dataset.visibleCount || "0");
+      const next = Math.min(current + TABLE_PAGE_SIZE, rows.length);
+      tbody.innerHTML = renderTableRows(rows, columns, next);
+      tableResult.dataset.visibleCount = String(next);
+      countEl.textContent = `Showing ${next} of ${rows.length} rows`;
+
+      if (button && next >= rows.length) {
+        button.remove();
+      }
     }
 
     function renderConfirmButtons(candidates, originalQuestion) {
@@ -905,6 +957,11 @@
 
           if (action === "csv") {
             exportRowsAsCsv(rows);
+            return;
+          }
+
+          if (action === "load-more") {
+            loadMoreRows(row, rows);
             return;
           }
         });

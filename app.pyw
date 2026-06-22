@@ -12,7 +12,7 @@ from flask import Flask, jsonify, request, send_file
 
 
 BASE_DIR = Path(__file__).resolve().parent
-MAX_ROWS = 500
+MEMORY_ROWS = 500
 
 app = Flask(__name__)
 
@@ -515,10 +515,9 @@ def execute_sql(sql_query):
     with open_mysql_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(sql_query)
-            rows = cursor.fetchmany(MAX_ROWS + 1)
-            for row in rows[:MAX_ROWS]:
+            for row in cursor.fetchall():
                 results.append({key: make_json_value(value) for key, value in row.items()})
-    return results, len(rows) > MAX_ROWS
+    return results
 
 
 def user_requested_specific_row_count(question):
@@ -532,7 +531,7 @@ def user_requested_specific_row_count(question):
     return False
 
 
-def expand_broad_query_limit(sql_query, question):
+def remove_broad_query_limit(sql_query, question):
     if user_requested_specific_row_count(question):
         return sql_query
 
@@ -544,11 +543,7 @@ def expand_broad_query_limit(sql_query, question):
     if not match:
         return sql_query
 
-    limit = int(match.group(1))
-    if limit >= MAX_ROWS:
-        return sql_query
-
-    return pattern.sub(f"LIMIT {MAX_ROWS}", sql_query)
+    return pattern.sub("", sql_query).rstrip()
 
 
 def get_candidates(results):
@@ -686,7 +681,7 @@ def parse_last_result(payload):
         rows = []
 
     clean_rows = []
-    for row in rows[:MAX_ROWS]:
+    for row in rows[:MEMORY_ROWS]:
         if isinstance(row, dict):
             clean_rows.append(row)
 
@@ -861,10 +856,10 @@ def generate_sql(question, history, customers_table, confirmed_surname, confirme
     return extract_sql_query(raw)
 
 
-def generate_answer(question, history, results, rows_truncated, confirmed_surname, confirmed_customer_id):
+def generate_answer(question, history, results, confirmed_surname, confirmed_customer_id):
     enhanced_question = enhance_for_answer(question)
     if is_large_result_question(question, results):
-        return build_compact_result_answer(question, results, rows_truncated), recommend_chart(results, "table", question)
+        return build_compact_result_answer(question, results), recommend_chart(results, "table", question)
 
     prompt_question = format_for_prompt(
         enhanced_question,
@@ -891,7 +886,7 @@ def is_large_result_question(question, results):
     return bool(results and LISTING_PATTERN.search(question or ""))
 
 
-def build_compact_result_answer(question, results, rows_truncated=False):
+def build_compact_result_answer(question, results):
     row_count = len(results)
     first_row = results[0] if results else {}
     has_customer_fields = any(
@@ -900,9 +895,6 @@ def build_compact_result_answer(question, results, rows_truncated=False):
     )
     noun = "customer" if has_customer_fields else "row"
     noun = noun if row_count == 1 else f"{noun}s"
-
-    if rows_truncated:
-        return f"Showing the first {row_count} matching {noun}. There are more results."
 
     if wants_chart(question) or requested_chart_type(question):
         return f"I found {row_count} matching {noun}."
@@ -1025,7 +1017,7 @@ def ask_question():
             confirmed_customer_id,
         )
         sql_query = clean_sql(sql_query, customers_table)
-        sql_query = expand_broad_query_limit(sql_query, question)
+        sql_query = remove_broad_query_limit(sql_query, question)
 
         if sql_query.upper() == "NA":
             return jsonify(
@@ -1052,7 +1044,7 @@ def ask_question():
                 }
             )
 
-        results, rows_truncated = execute_sql(sql_query)
+        results = execute_sql(sql_query)
         candidates = get_candidates(results)
         if should_confirm(candidates, question, confirmed_customer_id):
             return jsonify(
@@ -1070,7 +1062,6 @@ def ask_question():
             question,
             history,
             results,
-            rows_truncated,
             confirmed_surname,
             confirmed_customer_id,
         )
@@ -1082,8 +1073,7 @@ def ask_question():
                 "answer": answer,
                 "data": results,
                 "chart_type": chart_type,
-                "rows_truncated": rows_truncated,
-                "display_limit": MAX_ROWS,
+                "total_rows": len(results),
             }
         )
     except pymysql.MySQLError as exc:
