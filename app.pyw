@@ -5,10 +5,18 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-import pymysql
-import pymysql.cursors
 import requests
 from flask import Flask, jsonify, request, send_file
+
+try:
+    import pyodbc
+except Exception as exc:
+    pyodbc = None
+    PYODBC_IMPORT_ERROR = exc
+else:
+    PYODBC_IMPORT_ERROR = None
+
+DATABASE_ERROR_TYPES = (pyodbc.Error,) if pyodbc is not None else ()
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -57,58 +65,76 @@ def parse_connection_string(connection_string):
     return values
 
 
-def get_connection_args():
+def get_connection_string():
     connection_string = os.environ.get("SqlConnectionString")
     if not connection_string or not connection_string.strip():
         return None
 
     values = parse_connection_string(connection_string)
-    host_override = os.environ.get("MySqlHost", "").strip()
+    host_override = os.environ.get("SqlServerHost", "").strip()
 
-    host = (
-        values.get("server")
-        or values.get("host")
-        or values.get("data source")
-        or "localhost"
-    )
     if host_override:
-        host = host_override
+        values["server"] = host_override
 
-    try:
-        port = int(values.get("port", "3306"))
-    except ValueError:
-        port = 3306
+    if "driver" not in values:
+        values["driver"] = "ODBC Driver 18 for SQL Server"
+    if "trustservercertificate" not in values and "encrypt" not in values:
+        values["trustservercertificate"] = "yes"
 
-    return {
-        "host": host,
-        "port": port,
-        "user": values.get("user id") or values.get("user") or values.get("uid") or "root",
-        "password": values.get("password") or values.get("pwd") or "",
-        "database": values.get("database") or values.get("initial catalog") or "",
-        "connect_timeout": 30,
-        "charset": "utf8mb4",
-        "autocommit": True,
-        "cursorclass": pymysql.cursors.DictCursor,
-    }
+    ordered_keys = [
+        "driver",
+        "server",
+        "database",
+        "initial catalog",
+        "user id",
+        "uid",
+        "password",
+        "pwd",
+        "trusted_connection",
+        "integrated security",
+        "encrypt",
+        "trustservercertificate",
+    ]
+    parts = []
+    seen = set()
+    for key in ordered_keys:
+        if key in values and values[key]:
+            parts.append(f"{key}={values[key]}")
+            seen.add(key)
+    for key, value in values.items():
+        if key not in seen and value:
+            parts.append(f"{key}={value}")
+    return ";".join(parts)
 
 
 def get_config_error():
-    host = os.environ.get("MySqlHost", "").strip()
+    host = os.environ.get("SqlServerHost", "").strip()
     if not host:
         return None
 
     placeholders = {"YOUR_WINDOWS_IP", "YOUR_SERVER"}
     if host.upper() in placeholders:
-        return f"MySqlHost is still '{host}'. Replace it with your MySQL host or leave it blank to use SqlConnectionString."
+        return f"SqlServerHost is still '{host}'. Replace it with your SQL Server host or leave it blank to use SqlConnectionString."
 
     return None
 
 
-def open_mysql_connection():
-    args = get_connection_args()
-    if args is None:
+def open_sql_server_connection():
+    if pyodbc is None:
+        raise RuntimeError(
+            "pyodbc could not load. Install pyodbc and Microsoft ODBC Driver 18 for SQL Server, "
+            f"then restart the app. Details: {PYODBC_IMPORT_ERROR}"
+        )
+
+    connection_string = get_connection_string()
+    if connection_string is None:
         raise RuntimeError("SqlConnectionString is not configured.")
-    return pymysql.connect(**args)
+    return pyodbc.connect(connection_string, timeout=30, autocommit=True)
+
+
+def rows_as_dicts(cursor):
+    columns = [column[0] for column in cursor.description or []]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 class SchemaProvider:
@@ -119,47 +145,46 @@ class SchemaProvider:
         if self._cached_customers_table:
             return self._cached_customers_table
 
-        if get_connection_args() is None:
+        if get_connection_string() is None:
             return None
 
         sql = """
-            SELECT TABLE_NAME
+            SELECT TOP (1) TABLE_NAME
             FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
+            WHERE TABLE_CATALOG = DB_NAME()
               AND COLUMN_NAME IN ('Surname', 'CreditScore', 'CustomerId')
             GROUP BY TABLE_NAME
-            HAVING SUM(COLUMN_NAME = 'Surname') > 0
+            HAVING SUM(CASE WHEN COLUMN_NAME = 'Surname' THEN 1 ELSE 0 END) > 0
             ORDER BY TABLE_NAME
-            LIMIT 1
         """
 
         try:
-            with open_mysql_connection() as connection:
+            with open_sql_server_connection() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(sql)
                     row = cursor.fetchone()
-                    self._cached_customers_table = row["TABLE_NAME"] if row else None
+                    self._cached_customers_table = row.TABLE_NAME if row else None
                     return self._cached_customers_table
         except Exception:
             return None
 
     def list_tables(self):
-        if get_connection_args() is None:
+        if get_connection_string() is None:
             return []
 
         sql = """
             SELECT TABLE_NAME
             FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
+            WHERE TABLE_CATALOG = DB_NAME()
               AND TABLE_TYPE = 'BASE TABLE'
             ORDER BY TABLE_NAME
         """
 
         tables = []
-        with open_mysql_connection() as connection:
+        with open_sql_server_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(sql)
-                for row in cursor.fetchall():
+                for row in rows_as_dicts(cursor):
                     tables.append(row["TABLE_NAME"])
         return tables
 
@@ -182,7 +207,7 @@ class SchemaProvider:
 
     @staticmethod
     def _load_schema_from_database():
-        if get_connection_args() is None:
+        if get_connection_string() is None:
             return "-- No schema file and SqlConnectionString is not configured."
 
         sql = """
@@ -196,16 +221,16 @@ class SchemaProvider:
                 ON c.TABLE_SCHEMA = t.TABLE_SCHEMA
                AND c.TABLE_NAME = t.TABLE_NAME
             WHERE t.TABLE_TYPE = 'BASE TABLE'
-              AND c.TABLE_SCHEMA = DATABASE()
+              AND c.TABLE_CATALOG = DB_NAME()
             ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
         """
 
         lines = ["-- Auto-generated from INFORMATION_SCHEMA"]
         current_table = None
-        with open_mysql_connection() as connection:
+        with open_sql_server_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(sql)
-                for row in cursor.fetchall():
+                for row in rows_as_dicts(cursor):
                     table = row.get("TABLE_NAME", "")
                     column = row.get("COLUMN_NAME", "")
                     data_type = row.get("DATA_TYPE", "")
@@ -214,10 +239,10 @@ class SchemaProvider:
                     if table != current_table:
                         if current_table is not None:
                             lines.append(");")
-                        lines.append(f"CREATE TABLE `{table}` (")
+                        lines.append(f"CREATE TABLE [{table}] (")
                         current_table = table
 
-                    lines.append(f"  `{column}` {data_type} NULL={nullable},")
+                    lines.append(f"  [{column}] {data_type} NULL={nullable},")
 
         if current_table is not None:
             lines.append(");")
@@ -405,7 +430,8 @@ def clean_sql(sql, actual_table_name="Customers"):
         .strip()
         .rstrip(";")
     )
-    return fix_surname_prefix_match(fix_customers_schema(sql, actual_table_name))
+    sql = fix_surname_prefix_match(fix_customers_schema(sql, actual_table_name))
+    return convert_limit_to_top(sql)
 
 
 def fix_surname_prefix_match(sql):
@@ -428,7 +454,7 @@ def fix_customers_schema(sql, actual_table_name):
     table_name = actual_table_name or "Customers"
 
     sql = re.sub(
-        r"(`?)(?:bank_data\.)?customers(`?)",
+        r"(`?|\[?)(?:bank_data\.)?(?:dbo\.)?customers(`?|\]?)",
         lambda match: f"{match.group(1)}{table_name}{match.group(2)}",
         sql,
         flags=re.IGNORECASE,
@@ -455,6 +481,32 @@ def fix_customers_schema(sql, actual_table_name):
         sql = re.sub(rf"\b{pattern}\b", replacement, sql, flags=re.IGNORECASE)
 
     return sql
+
+
+def convert_limit_to_top(sql):
+    match = re.search(r"\s+LIMIT\s+(\d+)\s*$", sql, re.IGNORECASE)
+    if not match:
+        return sql
+
+    limit = match.group(1)
+    without_limit = sql[: match.start()].rstrip()
+    if re.match(r"^\s*SELECT\s+TOP\s*\(", without_limit, re.IGNORECASE):
+        return without_limit
+    if re.match(r"^\s*SELECT\s+DISTINCT\b", without_limit, re.IGNORECASE):
+        return re.sub(
+            r"^\s*SELECT\s+DISTINCT\b",
+            f"SELECT DISTINCT TOP ({limit})",
+            without_limit,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    return re.sub(
+        r"^\s*SELECT\b",
+        f"SELECT TOP ({limit})",
+        without_limit,
+        count=1,
+        flags=re.IGNORECASE,
+    )
 
 
 def strip_comments(sql):
@@ -512,10 +564,10 @@ def make_json_value(value):
 
 def execute_sql(sql_query):
     results = []
-    with open_mysql_connection() as connection:
+    with open_sql_server_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(sql_query)
-            for row in cursor.fetchall():
+            for row in rows_as_dicts(cursor):
                 results.append({key: make_json_value(value) for key, value in row.items()})
     return results
 
@@ -540,10 +592,11 @@ def remove_broad_query_limit(sql_query, question):
 
     pattern = re.compile(r"\bLIMIT\s+(\d+)\s*$", re.IGNORECASE)
     match = pattern.search(sql_query)
-    if not match:
-        return sql_query
+    if match:
+        return pattern.sub("", sql_query).rstrip()
 
-    return pattern.sub("", sql_query).rstrip()
+    top_pattern = re.compile(r"^\s*SELECT\s+(DISTINCT\s+)?TOP\s*\(\s*\d+\s*\)\s+", re.IGNORECASE)
+    return top_pattern.sub(lambda match: f"SELECT {match.group(1) or ''}", sql_query, count=1)
 
 
 def get_candidates(results):
@@ -926,7 +979,7 @@ def get_database_schema():
 
 @app.route("/api/TestSqlConnection", methods=["GET", "POST"])
 def test_sql_connection():
-    if get_connection_args() is None:
+    if get_connection_string() is None:
         return jsonify(
             {
                 "success": False,
@@ -945,17 +998,20 @@ def test_sql_connection():
         )
 
     try:
-        with open_mysql_connection() as connection:
+        with open_sql_server_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT VERSION() AS ServerVersion, DATABASE() AS DatabaseName")
-                row = cursor.fetchone() or {}
+                cursor.execute("SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName")
+                rows = rows_as_dicts(cursor)
+                row = rows[0] if rows else {}
 
-        args = get_connection_args() or {}
+        values = parse_connection_string(os.environ.get("SqlConnectionString", ""))
         return jsonify(
             {
                 "success": True,
-                "message": "Connected to MySQL successfully.",
-                "server": args.get("host", ""),
+                "message": "Connected to SQL Server successfully.",
+                "server": os.environ.get("SqlServerHost", "").strip()
+                or values.get("server", "")
+                or values.get("data source", ""),
                 "database": row.get("DatabaseName", ""),
                 "serverVersion": row.get("ServerVersion", ""),
             }
@@ -964,9 +1020,9 @@ def test_sql_connection():
         return jsonify(
             {
                 "success": False,
-                "message": "Failed to connect to MySQL.",
+                "message": "Failed to connect to SQL Server.",
                 "error": str(exc),
-                "hint": "Connection refused usually means: wrong MySqlHost, MySQL not allowing remote connections, or a firewall blocking port 3306.",
+                "hint": "Connection refused usually means: wrong SqlServerHost/server, SQL Server not allowing TCP connections, missing ODBC Driver 18, or a firewall blocking port 1433.",
             }
         )
 
@@ -985,7 +1041,7 @@ def ask_question():
         if chart_response is not None:
             return jsonify(chart_response)
 
-    if get_connection_args() is None:
+    if get_connection_string() is None:
         return jsonify({"error": "SqlConnectionString is not configured."})
 
     if not os.environ.get("OpenAIApiKey"):
@@ -1076,7 +1132,7 @@ def ask_question():
                 "total_rows": len(results),
             }
         )
-    except pymysql.MySQLError as exc:
+    except DATABASE_ERROR_TYPES as exc:
         return jsonify(
             {
                 "answer": "I couldn't run the database query. The table or column name may be wrong for your bank_data database.",

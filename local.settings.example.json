@@ -1,8 +1,8 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "MySqlHost": "",
-    "SqlConnectionString": "Server=localhost;Port=3306;Database=bank_data;User ID=root;Password=YOUR_PASSWORD;",
+    "SqlServerHost": "",
+    "SqlConnectionString": "Driver={ODBC Driver 18 for SQL Server};Server=localhost,1433;Database=bank_data;User ID=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=yes;",
     "OpenAIApiKey": "YOUR_OPENAI_API_KEY",
     "OpenAIModel": "gpt-4o-mini"
   }
