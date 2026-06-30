@@ -369,7 +369,7 @@
         } else {
           status.textContent = "DB not connected";
           status.className = "bad";
-          addBot(`I can't reach the database yet.\n\n${data.error || data.message}\n\nIf MySQL runs on Windows and the app runs on Mac, set MySqlHost in local.settings.json to your Windows IP (run ipconfig on Windows).`);
+          addBot(`The database isn't connected yet.\n\n${data.error || data.message}\n\nFor SQL Server on Windows, set SqlConnectionString in local.settings.json with your SQL Server name, database, and authentication details.`);
         }
       } catch {
         status.textContent = "App not running";
