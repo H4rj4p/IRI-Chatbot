@@ -139,34 +139,7 @@ def rows_as_dicts(cursor):
 
 class SchemaProvider:
     def __init__(self):
-        self._cached_customers_table = None
-
-    def get_customers_table_name(self):
-        if self._cached_customers_table:
-            return self._cached_customers_table
-
-        if get_connection_string() is None:
-            return None
-
-        sql = """
-            SELECT TOP (1) TABLE_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_CATALOG = DB_NAME()
-              AND COLUMN_NAME IN ('Surname', 'CreditScore', 'CustomerId')
-            GROUP BY TABLE_NAME
-            HAVING SUM(CASE WHEN COLUMN_NAME = 'Surname' THEN 1 ELSE 0 END) > 0
-            ORDER BY TABLE_NAME
-        """
-
-        try:
-            with open_sql_server_connection() as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(sql)
-                    row = cursor.fetchone()
-                    self._cached_customers_table = row.TABLE_NAME if row else None
-                    return self._cached_customers_table
-        except Exception:
-            return None
+        self._cached_schema_text = None
 
     def list_tables(self):
         if get_connection_string() is None:
@@ -189,21 +162,16 @@ class SchemaProvider:
         return tables
 
     def get_schema_text(self):
-        file_schema = self._load_schema_file()
-        live_table = self.get_customers_table_name()
+        if self._cached_schema_text:
+            return self._cached_schema_text
 
-        if file_schema and live_table:
-            return file_schema.replace("Customers", live_table)
-
-        if file_schema:
-            return file_schema
+        if get_connection_string() is not None:
+            live_schema = self._load_schema_from_database()
+            if "CREATE TABLE" in live_schema.upper():
+                self._cached_schema_text = live_schema
+                return live_schema
 
         return self._load_schema_from_database()
-
-    @staticmethod
-    def _load_schema_file():
-        content = load_text_file("schema.sql").strip()
-        return content if "CREATE TABLE" in content.upper() else ""
 
     @staticmethod
     def _load_schema_from_database():
@@ -272,12 +240,37 @@ COMPARISON_PATTERN = re.compile(
 )
 LISTING_PATTERN = re.compile(
     r"\b(top|bottom|first|last|highest|lowest|most|least|all|list|show|give|"
-    r"rank|ranking|sort|order|customers|people|rows|salar(?:y|ies)|balances?)\b",
+    r"rank|ranking|sort|order|customers|people|rows|records|results|"
+    r"salar(?:y|ies)|balances?)\b",
     re.IGNORECASE,
 )
 
-ID_COLUMNS = {"customerid", "rownumber", "id"}
-CATEGORY_COLUMNS = {"geography", "gender", "surname"}
+ID_COLUMNS = {
+    "id",
+    "customerid",
+    "customer_id",
+    "rownumber",
+    "row_number",
+    "accountid",
+    "account_id",
+    "userid",
+    "user_id",
+}
+CATEGORY_COLUMNS = {
+    "category",
+    "type",
+    "status",
+    "region",
+    "country",
+    "state",
+    "city",
+    "geography",
+    "gender",
+    "surname",
+    "name",
+    "customername",
+    "customer_name",
+}
 VALID_CHART_TYPES = {"bar", "line", "pie"}
 
 
@@ -314,6 +307,8 @@ def parse_chat_request(data):
     message = str(data.get("message") or "")
     confirmed_surname = data.get("confirmed_surname")
     confirmed_customer_id = data.get("confirmed_customer_id")
+    confirmed_label = data.get("confirmed_label") or confirmed_surname
+    confirmed_id = data.get("confirmed_id") or confirmed_customer_id
 
     history = []
     raw_history = data.get("history")
@@ -329,12 +324,12 @@ def parse_chat_request(data):
     return (
         message,
         history,
-        str(confirmed_surname) if confirmed_surname else None,
-        str(confirmed_customer_id) if confirmed_customer_id else None,
+        str(confirmed_label) if confirmed_label else None,
+        str(confirmed_id) if confirmed_id else None,
     )
 
 
-def format_for_prompt(question, history, confirmed_surname=None, confirmed_customer_id=None):
+def format_for_prompt(question, history, confirmed_label=None, confirmed_id=None):
     lines = []
     if history:
         lines.append("Conversation so far:")
@@ -344,15 +339,15 @@ def format_for_prompt(question, history, confirmed_surname=None, confirmed_custo
 
     lines.append(f"Current question: {question}" if lines else question)
 
-    if confirmed_customer_id:
+    if confirmed_id:
         lines.append(
-            f"The user confirmed they mean CustomerId exactly: {confirmed_customer_id}. "
-            "Use WHERE CustomerId = that exact value."
+            f"The user selected the result/entity whose id is exactly: {confirmed_id}. "
+            "Use the relevant id column from the schema if that resolves the question."
         )
-    elif confirmed_surname:
+    elif confirmed_label:
         lines.append(
-            f"The user confirmed they mean customer with Surname exactly: {confirmed_surname}. "
-            "Use WHERE Surname = that exact value (not LIKE)."
+            f"The user selected the result/entity labeled exactly: {confirmed_label}. "
+            "Use the relevant name/label column from the schema if that resolves the question."
         )
 
     return "\n".join(lines)
@@ -417,7 +412,7 @@ def extract_sql_query(raw):
     return raw
 
 
-def clean_sql(sql, actual_table_name="Customers"):
+def clean_sql(sql):
     if not sql or not sql.strip():
         return "NA"
 
@@ -430,57 +425,7 @@ def clean_sql(sql, actual_table_name="Customers"):
         .strip()
         .rstrip(";")
     )
-    sql = fix_surname_prefix_match(fix_customers_schema(sql, actual_table_name))
     return convert_limit_to_top(sql)
-
-
-def fix_surname_prefix_match(sql):
-    sql = re.sub(
-        r"(\bSurname\b)\s+LIKE\s+(['\"])%([^'\"%]+)%\2",
-        r"\1 LIKE \2\3%\2",
-        sql,
-        flags=re.IGNORECASE,
-    )
-    sql = re.sub(
-        r"(\bSurname\b)\s+LIKE\s+(['\"])%([^'\"%]+)\2",
-        r"\1 LIKE \2\3%\2",
-        sql,
-        flags=re.IGNORECASE,
-    )
-    return sql
-
-
-def fix_customers_schema(sql, actual_table_name):
-    table_name = actual_table_name or "Customers"
-
-    sql = re.sub(
-        r"(`?|\[?)(?:bank_data\.)?(?:dbo\.)?customers(`?|\]?)",
-        lambda match: f"{match.group(1)}{table_name}{match.group(2)}",
-        sql,
-        flags=re.IGNORECASE,
-    )
-
-    columns = {
-        "customerid": "CustomerId",
-        "surname": "Surname",
-        "creditscore": "CreditScore",
-        "geography": "Geography",
-        "gender": "Gender",
-        "age": "Age",
-        "tenure": "Tenure",
-        "balance": "Balance",
-        "numofproducts": "NumOfProducts",
-        "hascrcard": "HasCrCard",
-        "isactivemember": "IsActiveMember",
-        "estimatedsalary": "EstimatedSalary",
-        "exited": "Exited",
-        "rownumber": "RowNumber",
-    }
-
-    for pattern, replacement in columns.items():
-        sql = re.sub(rf"\b{pattern}\b", replacement, sql, flags=re.IGNORECASE)
-
-    return sql
 
 
 def convert_limit_to_top(sql):
@@ -599,37 +544,69 @@ def remove_broad_query_limit(sql_query, question):
     return top_pattern.sub(lambda match: f"SELECT {match.group(1) or ''}", sql_query, count=1)
 
 
+def find_first_column(keys, names):
+    normalized = {key.lower(): key for key in keys}
+    for name in names:
+        if name in normalized:
+            return normalized[name]
+    return None
+
+
 def get_candidates(results):
     if not results:
         return []
 
     keys = [key for row in results for key in row.keys()]
-    surname_key = next((key for key in keys if key.lower() == "surname"), None)
-    if not surname_key:
+    label_key = find_first_column(
+        keys,
+        (
+            "name",
+            "customername",
+            "customer_name",
+            "surname",
+            "title",
+            "label",
+            "email",
+            "username",
+            "user_name",
+        ),
+    )
+    if not label_key:
         return []
 
-    customer_id_key = next((key for key in keys if key.lower() == "customerid"), None)
+    id_key = find_first_column(
+        keys,
+        (
+            "id",
+            "customerid",
+            "customer_id",
+            "accountid",
+            "account_id",
+            "userid",
+            "user_id",
+        ),
+    )
     seen = set()
     candidates = []
 
     for row in results:
-        surname = row.get(surname_key)
-        if not surname:
+        label = row.get(label_key)
+        if not label:
             continue
 
-        customer_id = row.get(customer_id_key) if customer_id_key else None
-        dedupe_key = str(customer_id) if customer_id is not None else str(surname).lower()
+        entity_id = row.get(id_key) if id_key else None
+        dedupe_key = str(entity_id) if entity_id is not None else str(label).lower()
         if dedupe_key in seen:
             continue
 
         seen.add(dedupe_key)
-        candidates.append({"customer_id": customer_id, "surname": str(surname)})
+        candidates.append({"id": entity_id, "label": str(label)})
 
-    return sorted(candidates, key=lambda c: (c["surname"].lower(), str(c["customer_id"])))
+    return sorted(candidates, key=lambda c: (c["label"].lower(), str(c["id"])))
 
 
-def should_confirm(candidates, question, confirmed_customer_id):
-    if confirmed_customer_id:
+def should_confirm(candidates, question, confirmed_id):
+    if confirmed_id:
         return False
     if len(candidates) <= 1:
         return False
@@ -638,21 +615,21 @@ def should_confirm(candidates, question, confirmed_customer_id):
     if LISTING_PATTERN.search(question or ""):
         return False
 
-    surname_counts = {}
+    label_counts = {}
     for candidate in candidates:
-        surname = str(candidate.get("surname") or "").strip().lower()
-        if surname:
-            surname_counts[surname] = surname_counts.get(surname, 0) + 1
+        label = str(candidate.get("label") or "").strip().lower()
+        if label:
+            label_counts[label] = label_counts.get(label, 0) + 1
 
-    duplicate_surnames = [
-        surname
-        for surname, count in surname_counts.items()
+    duplicate_labels = [
+        label
+        for label, count in label_counts.items()
         if count > 1
     ]
     question_text = question or ""
     return any(
-        re.search(rf"\b{re.escape(surname)}\b", question_text, re.IGNORECASE)
-        for surname in duplicate_surnames
+        re.search(rf"\b{re.escape(label)}\b", question_text, re.IGNORECASE)
+        for label in duplicate_labels
     )
 
 
@@ -765,13 +742,15 @@ def summarize_last_result(last_result):
     ]
 
     memory = last_result.get("memory") if isinstance(last_result.get("memory"), dict) else {}
-    people = memory.get("people") if isinstance(memory.get("people"), list) else []
+    entities = memory.get("entities") if isinstance(memory.get("entities"), list) else []
+    if not entities:
+        entities = memory.get("people") if isinstance(memory.get("people"), list) else []
     numeric_columns = memory.get("numeric_columns") if isinstance(memory.get("numeric_columns"), list) else []
 
-    if people:
+    if entities:
         parts.append(
-            "Previous people/customers: "
-            + json.dumps(people[:20], default=str)
+            "Previous entities/rows: "
+            + json.dumps(entities[:20], default=str)
         )
     if memory.get("label_column"):
         parts.append(f"Previous chart label/x-axis column: {memory['label_column']}")
@@ -781,10 +760,10 @@ def summarize_last_result(last_result):
         parts.append(f"Previous numeric metrics: {', '.join(str(col) for col in numeric_columns)}")
     if last_result.get("chart_type"):
         parts.append(f"Previous chart type: {last_result['chart_type']}")
-    if people:
+    if entities:
         parts.append(
-            "If the user says they, them, their, those customers, or those people, "
-            "treat that as referring to the previous people/customers listed above."
+            "If the user says they, them, their, those, or those rows, "
+            "treat that as referring to the previous entities/rows listed above."
         )
 
     return "\n".join(part for part in parts if part.strip())
@@ -890,26 +869,25 @@ def build_chart_followup_response(question, last_result):
     }
 
 
-def generate_sql(question, history, customers_table, confirmed_surname, confirmed_customer_id):
+def generate_sql(question, history, confirmed_label, confirmed_id):
     schema_text = schema_provider.get_schema_text()
     instructions_text = load_text_file("instructions.txt")
-    samples_text = load_text_file("sample_queries.txt")
     enhanced_question = enhance_for_sql(question)
     prompt_question = format_for_prompt(
         enhanced_question,
         history,
-        confirmed_surname,
-        confirmed_customer_id,
+        confirmed_label,
+        confirmed_id,
     )
 
     raw = get_openai_completion(
-        system_prompt=f"{instructions_text}\n\nDatabase Schema:\n{schema_text}\n\nExample Queries:\n{samples_text}",
+        system_prompt=f"{instructions_text}\n\nDatabase Schema:\n{schema_text}",
         user_prompt=prompt_question,
     )
     return extract_sql_query(raw)
 
 
-def generate_answer(question, history, results, confirmed_surname, confirmed_customer_id):
+def generate_answer(question, history, results, confirmed_label, confirmed_id):
     enhanced_question = enhance_for_answer(question)
     if is_large_result_question(question, results):
         return build_compact_result_answer(question, results), recommend_chart(results, "table", question)
@@ -917,8 +895,8 @@ def generate_answer(question, history, results, confirmed_surname, confirmed_cus
     prompt_question = format_for_prompt(
         enhanced_question,
         history,
-        confirmed_surname,
-        confirmed_customer_id,
+        confirmed_label,
+        confirmed_id,
     )
     raw_answer = get_openai_completion(
         system_prompt=(
@@ -941,13 +919,7 @@ def is_large_result_question(question, results):
 
 def build_compact_result_answer(question, results):
     row_count = len(results)
-    first_row = results[0] if results else {}
-    has_customer_fields = any(
-        key.lower() in {"customerid", "surname"}
-        for key in first_row.keys()
-    )
-    noun = "customer" if has_customer_fields else "row"
-    noun = noun if row_count == 1 else f"{noun}s"
+    noun = "row" if row_count == 1 else "rows"
 
     if wants_chart(question) or requested_chart_type(question):
         return f"I found {row_count} matching {noun}."
@@ -970,7 +942,7 @@ def get_database_schema():
             {
                 "success": True,
                 "schema": schema_provider.get_schema_text(),
-                "hint": "Copy useful parts into schema.sql and sample_queries.txt for better answers.",
+                "hint": "Use this schema when writing database-specific mappings in instructions.txt.",
             }
         )
     except Exception as exc:
@@ -1030,7 +1002,7 @@ def test_sql_connection():
 @app.route("/api/AskQuestion", methods=["POST"])
 def ask_question():
     payload = request.get_json(silent=True) or {}
-    question, history, confirmed_surname, confirmed_customer_id = parse_chat_request(payload)
+    question, history, confirmed_label, confirmed_id = parse_chat_request(payload)
     last_result = parse_last_result(payload)
 
     if not question.strip():
@@ -1053,26 +1025,22 @@ def ask_question():
 
     try:
         history = add_result_context_to_history(history, last_result)
-        customers_table = schema_provider.get_customers_table_name()
-        if not customers_table:
-            tables = schema_provider.list_tables()
+        tables = schema_provider.list_tables()
+        if not tables:
             return jsonify(
                 {
-                    "answer": "I can't find a Customers table in bank_data. Create/import your data first, then try again.",
-                    "error": "No tables found in bank_data."
-                    if not tables
-                    else f"Tables found: {', '.join(tables)}",
+                    "answer": "I can't find any tables in the connected database. Create/import your data first, then try again.",
+                    "error": "No base tables found in the connected database.",
                 }
             )
 
         sql_query = generate_sql(
             question,
             history,
-            customers_table,
-            confirmed_surname,
-            confirmed_customer_id,
+            confirmed_label,
+            confirmed_id,
         )
-        sql_query = clean_sql(sql_query, customers_table)
+        sql_query = clean_sql(sql_query)
         sql_query = remove_broad_query_limit(sql_query, question)
 
         if sql_query.upper() == "NA":
@@ -1080,9 +1048,9 @@ def ask_question():
                 {
                     "query": "NA",
                     "answer": (
-                        "I couldn't map that question to your bank_data tables. Open "
+                        "I couldn't map that question to your database tables. Open "
                         '/api/GetDatabaseSchema to see table and column names, then ask using those names - '
-                        'for example: "What is the credit score for customers named Hill?"'
+                        'for example: "How many rows are in TableName?"'
                     ),
                     "data": [],
                     "chart_type": "table",
@@ -1102,11 +1070,11 @@ def ask_question():
 
         results = execute_sql(sql_query)
         candidates = get_candidates(results)
-        if should_confirm(candidates, question, confirmed_customer_id):
+        if should_confirm(candidates, question, confirmed_id):
             return jsonify(
                 {
                     "query": sql_query,
-                    "answer": f"I found {len(candidates)} matching customers. Which one did you mean?",
+                    "answer": f"I found {len(candidates)} matching results. Which one did you mean?",
                     "needs_confirmation": True,
                     "candidates": candidates,
                     "data": results,
@@ -1118,8 +1086,8 @@ def ask_question():
             question,
             history,
             results,
-            confirmed_surname,
-            confirmed_customer_id,
+            confirmed_label,
+            confirmed_id,
         )
         chart_type = recommend_chart(results, chart_type, question)
 
@@ -1135,7 +1103,7 @@ def ask_question():
     except DATABASE_ERROR_TYPES as exc:
         return jsonify(
             {
-                "answer": "I couldn't run the database query. The table or column name may be wrong for your bank_data database.",
+                "answer": "I couldn't run the database query. The table or column name may be wrong for your connected database.",
                 "error": str(exc),
             }
         )

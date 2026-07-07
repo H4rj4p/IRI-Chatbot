@@ -304,7 +304,7 @@
       <div class="avatar">AI</div>
       <div class="bubble" id="welcome">
         Hi! I'm IRI AI. Ask questions about your connected database in plain English, and I'll answer in plain English too.
-        <div class="meta">Example: "How many rows are in customers?" — use your real table names from /api/GetDatabaseSchema</div>
+        <div class="meta">Example: "How many rows are in my main table?" — use your real table names from /api/GetDatabaseSchema</div>
       </div>
     </div>
   </div>
@@ -332,9 +332,9 @@
       "#19c37d", "#5436da", "#3b82f6", "#f59e0b", "#ef4444",
       "#8b5cf6", "#14b8a6", "#ec4899", "#84cc16", "#06b6d4"
     ];
-    const ID_COLS = new Set(["customerid", "rownumber", "id"]);
+    const ID_COLS = new Set(["id", "customerid", "customer_id", "rownumber", "row_number", "accountid", "account_id", "userid", "user_id"]);
     const TABLE_PAGE_SIZE = 100;
-    const PREFERRED_LABELS = ["surname", "geography", "gender", "customername", "name"];
+    const PREFERRED_LABELS = ["name", "customername", "customer_name", "surname", "title", "label", "category", "type", "status", "region", "country", "state", "city", "geography", "gender"];
     const PREFERRED_VALUES = [
       "estimatedsalary", "salary", "balance", "creditscore", "age",
       "count", "total", "average", "avg", "male", "female"
@@ -846,15 +846,15 @@
     function renderConfirmButtons(candidates, originalQuestion) {
       if (!candidates || candidates.length === 0) return "";
       const buttons = candidates.map(candidate => {
-        const surname = typeof candidate === "string" ? candidate : candidate.surname;
-        const customerId = typeof candidate === "string" ? "" : candidate.customer_id;
-        const label = customerId
-          ? `${surname} (ID: ${customerId})`
-          : surname;
+        const entityLabel = typeof candidate === "string" ? candidate : (candidate.label || candidate.surname || "");
+        const entityId = typeof candidate === "string" ? "" : (candidate.id ?? candidate.customer_id ?? "");
+        const label = entityId
+          ? `${entityLabel} (ID: ${entityId})`
+          : entityLabel;
         return `
           <button type="button" class="name-pick"
-            data-surname="${escapeAttr(surname)}"
-            data-customer-id="${escapeAttr(customerId ?? "")}"
+            data-label="${escapeAttr(entityLabel)}"
+            data-id="${escapeAttr(entityId ?? "")}"
             data-question="${escapeAttr(originalQuestion)}">
             ${escapeHtml(label)}
           </button>
@@ -870,21 +870,21 @@
       const labelCol = safeRows.length > 0 ? getLabelColumn(safeRows, valueCol) : null;
       const numericCols = safeRows.length > 0 ? getNumericColumns(safeRows[0]) : [];
 
-      const customerIdCol = columns.find(col => col.toLowerCase() === "customerid");
-      const surnameCol = columns.find(col => col.toLowerCase() === "surname");
-      const people = safeRows.slice(0, 20)
+      const idCol = columns.find(col => ID_COLS.has(col.toLowerCase()));
+      const labelColForMemory = columns.find(col => PREFERRED_LABELS.includes(col.toLowerCase()));
+      const entities = safeRows.slice(0, 20)
         .map(row => ({
-          customer_id: customerIdCol ? row[customerIdCol] : null,
-          surname: surnameCol ? row[surnameCol] : null
+          id: idCol ? row[idCol] : null,
+          label: labelColForMemory ? row[labelColForMemory] : null
         }))
-        .filter(person => person.customer_id !== null || person.surname);
+        .filter(entity => entity.id !== null || entity.label);
 
       return {
         question,
         query,
         chart_type: chartType || "table",
         memory: {
-          people,
+          entities,
           columns,
           numeric_columns: numericCols,
           label_column: labelCol,
@@ -926,7 +926,7 @@
 
       row.querySelectorAll(".name-pick").forEach(btn => {
         btn.addEventListener("click", () => {
-          confirmCustomer(btn.dataset.question, btn.dataset.surname, btn.dataset.customerId);
+          confirmEntity(btn.dataset.question, btn.dataset.label, btn.dataset.id);
         });
       });
 
@@ -1022,7 +1022,7 @@
       input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
     }
 
-    async function sendQuestion(text, confirmedSurname, confirmedCustomerId) {
+    async function sendQuestion(text, confirmedLabel, confirmedId) {
       const history = chatHistory.slice(-8);
       send.disabled = true;
 
@@ -1035,8 +1035,8 @@
       try {
         const payload = { message: text, history };
         if (lastResultContext) payload.last_result = lastResultContext;
-        if (confirmedSurname) payload.confirmed_surname = confirmedSurname;
-        if (confirmedCustomerId) payload.confirmed_customer_id = String(confirmedCustomerId);
+        if (confirmedLabel) payload.confirmed_label = confirmedLabel;
+        if (confirmedId) payload.confirmed_id = String(confirmedId);
 
         const res = await fetch(`${base}/api/AskQuestion`, {
           method: "POST",
@@ -1085,10 +1085,10 @@
       }
     }
 
-    async function confirmCustomer(originalQuestion, surname, customerId) {
-      const label = customerId ? `${surname} (ID: ${customerId})` : surname;
+    async function confirmEntity(originalQuestion, entityLabel, entityId) {
+      const label = entityId ? `${entityLabel} (ID: ${entityId})` : entityLabel;
       addUser(`Yes, ${label}`);
-      await sendQuestion(originalQuestion, surname, customerId);
+      await sendQuestion(originalQuestion, entityLabel, entityId);
     }
 
     async function askQuestion() {
