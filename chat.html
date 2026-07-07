@@ -332,14 +332,31 @@
       "#19c37d", "#5436da", "#3b82f6", "#f59e0b", "#ef4444",
       "#8b5cf6", "#14b8a6", "#ec4899", "#84cc16", "#06b6d4"
     ];
-    const ID_COLS = new Set(["id", "customerid", "customer_id", "rownumber", "row_number", "accountid", "account_id", "userid", "user_id"]);
+    const ID_COLS = new Set(["id"]);
     const TABLE_PAGE_SIZE = 100;
-    const PREFERRED_LABELS = ["name", "customername", "customer_name", "surname", "title", "label", "category", "type", "status", "region", "country", "state", "city", "geography", "gender"];
+    const PREFERRED_LABELS = ["name", "label", "title", "category", "type", "status", "region", "country", "state", "city"];
     const PREFERRED_VALUES = [
       "estimatedsalary", "salary", "balance", "creditscore", "age",
       "count", "total", "average", "avg", "male", "female"
     ];
     const chartInstances = new Map();
+
+    function normalizeColumnName(name) {
+      return String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    }
+
+    function isIdColumn(name) {
+      const normalized = normalizeColumnName(name);
+      return normalized === "id" || normalized.endsWith("id");
+    }
+
+    function isLabelColumn(name) {
+      const normalized = normalizeColumnName(name);
+      return ["name", "label", "title", "email", "username"].includes(normalized)
+        || normalized.endsWith("name")
+        || normalized.endsWith("label")
+        || normalized.endsWith("title");
+    }
 
     function looksLikeJson(text) {
       if (!text) return false;
@@ -846,8 +863,8 @@
     function renderConfirmButtons(candidates, originalQuestion) {
       if (!candidates || candidates.length === 0) return "";
       const buttons = candidates.map(candidate => {
-        const entityLabel = typeof candidate === "string" ? candidate : (candidate.label || candidate.surname || "");
-        const entityId = typeof candidate === "string" ? "" : (candidate.id ?? candidate.customer_id ?? "");
+        const entityLabel = typeof candidate === "string" ? candidate : (candidate.label || "");
+        const entityId = typeof candidate === "string" ? "" : (candidate.id ?? "");
         const label = entityId
           ? `${entityLabel} (ID: ${entityId})`
           : entityLabel;
@@ -870,8 +887,9 @@
       const labelCol = safeRows.length > 0 ? getLabelColumn(safeRows, valueCol) : null;
       const numericCols = safeRows.length > 0 ? getNumericColumns(safeRows[0]) : [];
 
-      const idCol = columns.find(col => ID_COLS.has(col.toLowerCase()));
-      const labelColForMemory = columns.find(col => PREFERRED_LABELS.includes(col.toLowerCase()));
+      const idCol = columns.find(isIdColumn);
+      const labelColForMemory = columns.find(isLabelColumn)
+        || columns.find(col => PREFERRED_LABELS.includes(col.toLowerCase()));
       const entities = safeRows.slice(0, 20)
         .map(row => ({
           id: idCol ? row[idCol] : null,

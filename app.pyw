@@ -240,22 +240,11 @@ COMPARISON_PATTERN = re.compile(
 )
 LISTING_PATTERN = re.compile(
     r"\b(top|bottom|first|last|highest|lowest|most|least|all|list|show|give|"
-    r"rank|ranking|sort|order|customers|people|rows|records|results|"
-    r"salar(?:y|ies)|balances?)\b",
+    r"rank|ranking|sort|order|rows|records|results)\b",
     re.IGNORECASE,
 )
 
-ID_COLUMNS = {
-    "id",
-    "customerid",
-    "customer_id",
-    "rownumber",
-    "row_number",
-    "accountid",
-    "account_id",
-    "userid",
-    "user_id",
-}
+ID_COLUMNS = {"id"}
 CATEGORY_COLUMNS = {
     "category",
     "type",
@@ -264,14 +253,30 @@ CATEGORY_COLUMNS = {
     "country",
     "state",
     "city",
-    "geography",
-    "gender",
-    "surname",
     "name",
-    "customername",
-    "customer_name",
+    "label",
+    "title",
 }
 VALID_CHART_TYPES = {"bar", "line", "pie"}
+
+
+def normalize_column_name(name):
+    return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+
+
+def is_id_column_name(name):
+    normalized = normalize_column_name(name)
+    return normalized == "id" or normalized.endswith("id")
+
+
+def is_label_column_name(name):
+    normalized = normalize_column_name(name)
+    return (
+        normalized in {"name", "label", "title", "email", "username"}
+        or normalized.endswith("name")
+        or normalized.endswith("label")
+        or normalized.endswith("title")
+    )
 
 
 def is_multi_part(question):
@@ -305,10 +310,8 @@ def parse_chat_request(data):
         data = {}
 
     message = str(data.get("message") or "")
-    confirmed_surname = data.get("confirmed_surname")
-    confirmed_customer_id = data.get("confirmed_customer_id")
-    confirmed_label = data.get("confirmed_label") or confirmed_surname
-    confirmed_id = data.get("confirmed_id") or confirmed_customer_id
+    confirmed_label = data.get("confirmed_label")
+    confirmed_id = data.get("confirmed_id")
 
     history = []
     raw_history = data.get("history")
@@ -521,7 +524,7 @@ def user_requested_specific_row_count(question):
     text = question or ""
     if re.search(r"\b(top|bottom|first|last)\s+\d+\b", text, re.IGNORECASE):
         return True
-    if re.search(r"\b\d+\s+(rows|records|results|customers|people)\b", text, re.IGNORECASE):
+    if re.search(r"\b\d+\s+(rows|records|results)\b", text, re.IGNORECASE):
         return True
     if re.search(r"\blimit\s+\d+\b", text, re.IGNORECASE):
         return True
@@ -544,11 +547,10 @@ def remove_broad_query_limit(sql_query, question):
     return top_pattern.sub(lambda match: f"SELECT {match.group(1) or ''}", sql_query, count=1)
 
 
-def find_first_column(keys, names):
-    normalized = {key.lower(): key for key in keys}
-    for name in names:
-        if name in normalized:
-            return normalized[name]
+def find_first_column(keys, matcher):
+    for key in keys:
+        if matcher(key):
+            return key
     return None
 
 
@@ -559,32 +561,14 @@ def get_candidates(results):
     keys = [key for row in results for key in row.keys()]
     label_key = find_first_column(
         keys,
-        (
-            "name",
-            "customername",
-            "customer_name",
-            "surname",
-            "title",
-            "label",
-            "email",
-            "username",
-            "user_name",
-        ),
+        is_label_column_name,
     )
     if not label_key:
         return []
 
     id_key = find_first_column(
         keys,
-        (
-            "id",
-            "customerid",
-            "customer_id",
-            "accountid",
-            "account_id",
-            "userid",
-            "user_id",
-        ),
+        is_id_column_name,
     )
     seen = set()
     candidates = []
@@ -662,8 +646,6 @@ def is_chart_followup(question):
         "can",
         "chart",
         "charts",
-        "customer",
-        "customers",
         "diagram",
         "graph",
         "graphs",
