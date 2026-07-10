@@ -1,9 +1,12 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "SqlServerHost": "",
-    "SqlConnectionString": "Driver={ODBC Driver 18 for SQL Server};Server=YOUR_SERVER,1433;Database=YOUR_DATABASE;User ID=YOUR_USER;Password=YOUR_PASSWORD;Encrypt=yes;TrustServerCertificate=yes;",
-    "OpenAIApiKey": "YOUR_OPENAI_API_KEY",
+    "SqlServer": "172.18.0.4,1433",
+    "SqlDatabase": "Prohance",
+    "SqlUser": "VMWinSQLS",
+    "SqlPassword": "YOUR_PASSWORD",
+    "SqlConnectionString": "Driver={ODBC Driver 18 for SQL Server};Server=172.18.0.4,1433;Database=Prohance;User ID=VMWinSQLS;Password=YOUR_PASSWORD;Encrypt=yes;TrustServerCertificate=yes;",
+    "OpenAIApiKey": "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",
     "OpenAIModel": "gpt-4o-mini"
   }
 }
