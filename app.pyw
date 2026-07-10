@@ -21,22 +21,102 @@ DATABASE_ERROR_TYPES = (pyodbc.Error,) if pyodbc is not None else ()
 
 BASE_DIR = Path(__file__).resolve().parent
 MEMORY_ROWS = 500
+LOCAL_SETTINGS_CANDIDATES = [
+    BASE_DIR / "local.settings.json",
+    Path.cwd() / "local.settings.json",
+]
+LOCAL_SETTINGS_PATH = LOCAL_SETTINGS_CANDIDATES[0]
+LOADED_SETTINGS_PATH = None
+LOCAL_SETTINGS_ERROR = None
+LOCAL_SETTINGS_WARNINGS = []
 
 app = Flask(__name__)
 
 
-def load_local_settings():
-    path = BASE_DIR / "local.settings.json"
-    if not path.exists():
+def set_env_if_missing(name, value):
+    if value is None:
         return
 
-    with path.open("r", encoding="utf-8") as handle:
-        settings = json.load(handle)
+    current = os.environ.get(name)
+    if current is None or not current.strip():
+        os.environ[name] = str(value)
 
-    for name, value in settings.get("Values", {}).items():
-        if value is None:
-            continue
-        os.environ.setdefault(name, str(value))
+
+def read_settings_file(path):
+    encodings = ("utf-8-sig", "utf-16")
+    last_error = None
+    for encoding in encodings:
+        try:
+            with path.open("r", encoding=encoding) as handle:
+                return json.load(handle)
+        except UnicodeError as exc:
+            last_error = exc
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            break
+
+    raise last_error or RuntimeError("Could not read settings file.")
+
+
+def collect_settings_values(settings):
+    values = {}
+    if not isinstance(settings, dict):
+        return values
+
+    for section_name in ("Values", "ConnectionStrings"):
+        section = settings.get(section_name)
+        if isinstance(section, dict):
+            values.update(section)
+
+    for key in (
+        "SqlConnectionString",
+        "SQLCONNSTR_SqlConnectionString",
+        "CUSTOMCONNSTR_SqlConnectionString",
+        "ConnectionStrings:SqlConnectionString",
+        "SqlServerHost",
+        "OpenAIApiKey",
+        "OpenAIModel",
+    ):
+        if key in settings:
+            values[key] = settings[key]
+
+    return values
+
+
+def load_local_settings():
+    global LOADED_SETTINGS_PATH, LOCAL_SETTINGS_ERROR
+    seen = set()
+    paths = []
+    for path in LOCAL_SETTINGS_CANDIDATES:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            paths.append(resolved)
+
+    path = next((candidate for candidate in paths if candidate.exists()), None)
+    if path is None:
+        LOCAL_SETTINGS_WARNINGS.append(
+            "local.settings.json was not found in: "
+            + ", ".join(str(candidate) for candidate in paths)
+        )
+        return
+
+    try:
+        settings = read_settings_file(path)
+    except Exception as exc:
+        LOCAL_SETTINGS_ERROR = str(exc)
+        return
+
+    LOADED_SETTINGS_PATH = path
+    values = collect_settings_values(settings)
+
+    aliases = {
+        "SQLCONNSTR_SqlConnectionString": "SqlConnectionString",
+        "CUSTOMCONNSTR_SqlConnectionString": "SqlConnectionString",
+        "ConnectionStrings:SqlConnectionString": "SqlConnectionString",
+    }
+    for name, value in values.items():
+        set_env_if_missing(aliases.get(name, name), value)
 
 
 load_local_settings()
@@ -66,7 +146,12 @@ def parse_connection_string(connection_string):
 
 
 def get_connection_string():
-    connection_string = os.environ.get("SqlConnectionString")
+    connection_string = (
+        os.environ.get("SqlConnectionString")
+        or os.environ.get("SQLCONNSTR_SqlConnectionString")
+        or os.environ.get("CUSTOMCONNSTR_SqlConnectionString")
+        or os.environ.get("ConnectionStrings:SqlConnectionString")
+    )
     if not connection_string or not connection_string.strip():
         return None
 
@@ -107,16 +192,54 @@ def get_connection_string():
     return ";".join(parts)
 
 
+def get_settings_status():
+    checked_paths = []
+    seen = set()
+    for path in LOCAL_SETTINGS_CANDIDATES:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            checked_paths.append(str(resolved))
+
+    return {
+        "settingsPath": str(LOADED_SETTINGS_PATH or LOCAL_SETTINGS_PATH),
+        "checkedSettingsPaths": checked_paths,
+        "settingsFileExists": bool(LOADED_SETTINGS_PATH),
+        "settingsLoadError": LOCAL_SETTINGS_ERROR,
+        "settingsWarnings": LOCAL_SETTINGS_WARNINGS,
+        "hasSqlConnectionString": bool(get_connection_string()),
+        "hasOpenAIApiKey": bool(os.environ.get("OpenAIApiKey", "").strip()),
+    }
+
+
 def get_config_error():
     host = os.environ.get("SqlServerHost", "").strip()
-    if not host:
-        return None
-
     placeholders = {"YOUR_WINDOWS_IP", "YOUR_SERVER"}
-    if host.upper() in placeholders:
+    if host and host.upper() in placeholders:
         return f"SqlServerHost is still '{host}'. Replace it with your SQL Server host or leave it blank to use SqlConnectionString."
 
+    values = parse_connection_string(get_connection_string() or "")
+    configured_server = values.get("server", "").split(",", 1)[0].strip()
+    if configured_server.upper() in placeholders:
+        return "SqlConnectionString still contains YOUR_SERVER. Replace the placeholders in local.settings.json with your SQL Server details."
+
     return None
+
+
+def print_startup_config():
+    status = get_settings_status()
+    print(f"App file: {Path(__file__).resolve()}")
+    print("Settings paths checked:")
+    for path in status["checkedSettingsPaths"]:
+        print(f"  - {path}")
+    print(f"Settings file loaded: {status['settingsFileExists']}")
+    print(f"Settings path used: {status['settingsPath']}")
+    if status["settingsLoadError"]:
+        print(f"Settings load error: {status['settingsLoadError']}")
+    for warning in status["settingsWarnings"]:
+        print(f"Settings warning: {warning}")
+    print(f"SqlConnectionString loaded: {status['hasSqlConnectionString']}")
+    print(f"OpenAIApiKey loaded: {status['hasOpenAIApiKey']}")
 
 
 def open_sql_server_connection():
@@ -937,7 +1060,12 @@ def test_sql_connection():
         return jsonify(
             {
                 "success": False,
-                "message": "SqlConnectionString is not set in local.settings.json (Values section).",
+                "message": "SqlConnectionString is not loaded.",
+                "error": (
+                    "Check that local.settings.json is beside app.pyw and contains "
+                    'Values.SqlConnectionString or ConnectionStrings.SqlConnectionString.'
+                ),
+                "config": get_settings_status(),
             }
         )
 
@@ -948,6 +1076,7 @@ def test_sql_connection():
                 "success": False,
                 "message": "Database config needs to be updated.",
                 "error": config_error,
+                "config": get_settings_status(),
             }
         )
 
@@ -958,7 +1087,7 @@ def test_sql_connection():
                 rows = rows_as_dicts(cursor)
                 row = rows[0] if rows else {}
 
-        values = parse_connection_string(os.environ.get("SqlConnectionString", ""))
+        values = parse_connection_string(get_connection_string() or "")
         return jsonify(
             {
                 "success": True,
@@ -968,6 +1097,7 @@ def test_sql_connection():
                 or values.get("data source", ""),
                 "database": row.get("DatabaseName", ""),
                 "serverVersion": row.get("ServerVersion", ""),
+                "config": get_settings_status(),
             }
         )
     except Exception as exc:
@@ -977,6 +1107,7 @@ def test_sql_connection():
                 "message": "Failed to connect to SQL Server.",
                 "error": str(exc),
                 "hint": "Connection refused usually means: wrong SqlServerHost/server, SQL Server not allowing TCP connections, missing ODBC Driver 18, or a firewall blocking port 1433.",
+                "config": get_settings_status(),
             }
         )
 
@@ -996,7 +1127,12 @@ def ask_question():
             return jsonify(chart_response)
 
     if get_connection_string() is None:
-        return jsonify({"error": "SqlConnectionString is not configured."})
+        return jsonify(
+            {
+                "error": "SqlConnectionString is not configured.",
+                "config": get_settings_status(),
+            }
+        )
 
     if not os.environ.get("OpenAIApiKey"):
         return jsonify(
@@ -1104,5 +1240,6 @@ def ask_question():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "7179"))
     host = os.environ.get("HOST", "0.0.0.0")
+    print_startup_config()
     print(f"Starting IRI AI on http://localhost:{port}/api/Chat")
     app.run(host=host, port=port, debug=False)

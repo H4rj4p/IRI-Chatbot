@@ -386,7 +386,10 @@
         } else {
           status.textContent = "DB not connected";
           status.className = "bad";
-          addBot(`The database isn't connected yet.\n\n${data.error || data.message}\n\nFor SQL Server on Windows, set SqlConnectionString in local.settings.json with your SQL Server name, database, and authentication details.`);
+          const config = data.config
+            ? `\n\nConfig checked:\n${JSON.stringify(data.config, null, 2)}`
+            : "";
+          addBot(`The database isn't connected yet.\n\n${data.error || data.message}${config}`);
         }
       } catch {
         status.textContent = "App not running";
