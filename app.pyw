@@ -218,10 +218,22 @@ def get_config_error():
     if host and host.upper() in placeholders:
         return f"SqlServerHost is still '{host}'. Replace it with your SQL Server host or leave it blank to use SqlConnectionString."
 
-    values = parse_connection_string(get_connection_string() or "")
+    connection_string = get_connection_string() or ""
+    values = parse_connection_string(connection_string)
     configured_server = values.get("server", "").split(",", 1)[0].strip()
     if configured_server.upper() in placeholders:
         return "SqlConnectionString still contains YOUR_SERVER. Replace the placeholders in local.settings.json with your SQL Server details."
+
+    for token in ("YOUR_DATABASE", "YOUR_USER", "YOUR_PASSWORD"):
+        if token in connection_string:
+            return (
+                f"SqlConnectionString still contains {token}. "
+                "Replace the placeholders in local.settings.json with your SQL Server details."
+            )
+
+    api_key = os.environ.get("OpenAIApiKey", "").strip()
+    if api_key in {"", "YOUR_OPENAI_API_KEY"}:
+        return "OpenAIApiKey is still a placeholder. Add your ChatGPT/OpenAI API key to local.settings.json."
 
     return None
 
