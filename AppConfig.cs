@@ -1,16 +1,25 @@
-using MySqlConnector;
+using Microsoft.Data.SqlClient;
 
 public static class AppConfig
 {
     private static readonly string[] PlaceholderHosts =
     {
-        "YOUR_WINDOWS_IP", "YOUR_SERVER", "localhost"
+        "YOUR_WINDOWS_IP", "YOUR_SERVER"
+    };
+
+    private static readonly string[] PlaceholderTokens =
+    {
+        "YOUR_SERVER", "YOUR_DATABASE", "YOUR_USER", "YOUR_PASSWORD", "YOUR_OPENAI_API_KEY"
     };
 
     public static string? GetSqlConnectionString()
     {
-        string? connectionString = Environment.GetEnvironmentVariable("SqlConnectionString");
-        string? hostOverride = Environment.GetEnvironmentVariable("MySqlHost");
+        string? connectionString =
+            Environment.GetEnvironmentVariable("SqlConnectionString")
+            ?? Environment.GetEnvironmentVariable("SQLCONNSTR_SqlConnectionString")
+            ?? Environment.GetEnvironmentVariable("CUSTOMCONNSTR_SqlConnectionString");
+
+        string? hostOverride = Environment.GetEnvironmentVariable("SqlServerHost");
 
         if (string.IsNullOrWhiteSpace(connectionString))
             return null;
@@ -19,10 +28,10 @@ public static class AppConfig
             return connectionString;
 
         hostOverride = hostOverride.Trim();
-        var builder = new MySqlConnectionStringBuilder(connectionString)
+        var builder = new SqlConnectionStringBuilder(connectionString)
         {
-            Server = hostOverride,
-            ConnectionTimeout = 30
+            DataSource = hostOverride,
+            ConnectTimeout = 30
         };
 
         return builder.ConnectionString;
@@ -30,17 +39,24 @@ public static class AppConfig
 
     public static string? GetConfigError()
     {
-        string? host = Environment.GetEnvironmentVariable("MySqlHost")?.Trim();
+        string? connectionString = GetSqlConnectionString();
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return "SqlConnectionString is not set. Add it to local.settings.json (Values section).";
 
-        // Empty MySqlHost = use Server from SqlConnectionString (e.g. localhost on Windows)
+        foreach (var token in PlaceholderTokens)
+        {
+            if (connectionString.Contains(token, StringComparison.OrdinalIgnoreCase))
+                return $"SqlConnectionString still contains '{token}'. Replace the placeholders with your SQL Server details.";
+        }
+
+        string? host = Environment.GetEnvironmentVariable("SqlServerHost")?.Trim();
+
+        // Empty SqlServerHost = use Server from SqlConnectionString
         if (string.IsNullOrWhiteSpace(host))
             return null;
 
         if (PlaceholderHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
-            return $"MySqlHost is still '{host}'. Replace it with your Windows IPv4 address from ipconfig on Windows.";
-
-        if (!System.Net.IPAddress.TryParse(host, out _))
-            return $"MySqlHost '{host}' does not look like an IP address. Use the IPv4 from ipconfig, e.g. 192.168.1.105.";
+            return $"SqlServerHost is still '{host}'. Replace it with your SQL Server host, or leave it blank to use SqlConnectionString.";
 
         return null;
     }

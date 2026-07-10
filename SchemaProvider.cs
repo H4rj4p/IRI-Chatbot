@@ -1,4 +1,4 @@
-using MySqlConnector;
+using Microsoft.Data.SqlClient;
 
 public class SchemaProvider
 {
@@ -35,21 +35,20 @@ public class SchemaProvider
             return null;
 
         const string sql = """
-            SELECT TABLE_NAME
+            SELECT TOP 1 TABLE_NAME
             FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-              AND COLUMN_NAME IN ('Surname', 'CreditScore', 'CustomerId')
+            WHERE TABLE_CATALOG = DB_NAME()
+              AND COLUMN_NAME IN (N'Surname', N'CreditScore', N'CustomerId')
             GROUP BY TABLE_NAME
-            HAVING SUM(COLUMN_NAME = 'Surname') > 0
+            HAVING SUM(CASE WHEN COLUMN_NAME = N'Surname' THEN 1 ELSE 0 END) > 0
             ORDER BY TABLE_NAME
-            LIMIT 1
             """;
 
         try
         {
-            await using var connection = new MySqlConnection(_connectionString);
+            await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
-            await using var command = new MySqlCommand(sql, connection);
+            await using var command = new SqlCommand(sql, connection);
             var result = await command.ExecuteScalarAsync();
             _cachedCustomersTable = result?.ToString();
             return _cachedCustomersTable;
@@ -69,14 +68,14 @@ public class SchemaProvider
         const string sql = """
             SELECT TABLE_NAME
             FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
+            WHERE TABLE_CATALOG = DB_NAME()
               AND TABLE_TYPE = 'BASE TABLE'
             ORDER BY TABLE_NAME
             """;
 
-        await using var connection = new MySqlConnection(_connectionString);
+        await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
-        await using var command = new MySqlCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
             tables.Add(reader.GetString(0));
@@ -108,18 +107,19 @@ public class SchemaProvider
                 c.IS_NULLABLE
             FROM INFORMATION_SCHEMA.COLUMNS c
             INNER JOIN INFORMATION_SCHEMA.TABLES t
-                ON c.TABLE_SCHEMA = t.TABLE_SCHEMA
+                ON c.TABLE_CATALOG = t.TABLE_CATALOG
+               AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
                AND c.TABLE_NAME = t.TABLE_NAME
             WHERE t.TABLE_TYPE = 'BASE TABLE'
-              AND c.TABLE_SCHEMA = DATABASE()
+              AND c.TABLE_CATALOG = DB_NAME()
             ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
             """;
 
         var lines = new List<string> { "-- Auto-generated from INFORMATION_SCHEMA" };
-        await using var connection = new MySqlConnection(_connectionString);
+        await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        await using var command = new MySqlCommand(sql, connection);
+        await using var command = new SqlCommand(sql, connection);
         await using var reader = await command.ExecuteReaderAsync();
 
         string? currentTable = null;
@@ -134,11 +134,11 @@ public class SchemaProvider
             {
                 if (currentTable != null)
                     lines.Add(");");
-                lines.Add($"CREATE TABLE `{table}` (");
+                lines.Add($"CREATE TABLE [{table}] (");
                 currentTable = table;
             }
 
-            lines.Add($"  `{column}` {dataType} NULL={nullable},");
+            lines.Add($"  [{column}] {dataType} NULL={nullable},");
         }
 
         if (currentTable != null)

@@ -1,7 +1,7 @@
 using System.Net;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
-using MySqlConnector;
+using Microsoft.Data.SqlClient;
 
 public class IriSqlTestFunction
 {
@@ -18,69 +18,7 @@ public class IriSqlTestFunction
     {
         var response = req.CreateResponse(HttpStatusCode.OK);
         HttpCors.Apply(response);
-
-        if (string.IsNullOrWhiteSpace(_sqlConnectionString))
-        {
-            await response.WriteAsJsonAsync(new
-            {
-                success = false,
-                message = "SqlConnectionString is not set in local.settings.json (Values section)."
-            });
-            return response;
-        }
-
-        string? configError = AppConfig.GetConfigError();
-        if (configError != null)
-        {
-            await response.WriteAsJsonAsync(new
-            {
-                success = false,
-                message = "Database config needs to be updated.",
-                error = configError
-            });
-            return response;
-        }
-
-        try
-        {
-            await using var connection = new MySqlConnection(_sqlConnectionString);
-            await connection.OpenAsync();
-
-            await using var command = new MySqlCommand(
-                "SELECT VERSION() AS ServerVersion, DATABASE() AS DatabaseName",
-                connection);
-            await using var reader = await command.ExecuteReaderAsync();
-
-            string serverVersion = "";
-            string databaseName = "";
-
-            if (await reader.ReadAsync())
-            {
-                serverVersion = reader["ServerVersion"]?.ToString() ?? "";
-                databaseName = reader["DatabaseName"]?.ToString() ?? "";
-            }
-
-            await response.WriteAsJsonAsync(new
-            {
-                success = true,
-                message = "Connected to MySQL successfully.",
-                server = connection.DataSource,
-                database = databaseName,
-                serverVersion
-            });
-        }
-        catch (Exception ex)
-        {
-            response.StatusCode = HttpStatusCode.OK;
-            await response.WriteAsJsonAsync(new
-            {
-                success = false,
-                message = "Failed to connect to MySQL.",
-                error = ex.Message,
-                hint = "Connection refused usually means: wrong MySqlHost IP, MySQL not allowing remote connections, or Windows firewall blocking port 3306."
-            });
-        }
-
+        await response.WriteAsJsonAsync(await ProcessAsync());
         return response;
     }
 
@@ -108,11 +46,11 @@ public class IriSqlTestFunction
 
         try
         {
-            await using var connection = new MySqlConnection(_sqlConnectionString);
+            await using var connection = new SqlConnection(_sqlConnectionString);
             await connection.OpenAsync();
 
-            await using var command = new MySqlCommand(
-                "SELECT VERSION() AS ServerVersion, DATABASE() AS DatabaseName",
+            await using var command = new SqlCommand(
+                "SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName",
                 connection);
             await using var reader = await command.ExecuteReaderAsync();
 
@@ -128,7 +66,7 @@ public class IriSqlTestFunction
             return new
             {
                 success = true,
-                message = "Connected to MySQL successfully.",
+                message = "Connected to SQL Server successfully.",
                 server = connection.DataSource,
                 database = databaseName,
                 serverVersion
@@ -139,9 +77,9 @@ public class IriSqlTestFunction
             return new
             {
                 success = false,
-                message = "Failed to connect to MySQL.",
+                message = "Failed to connect to SQL Server.",
                 error = ex.Message,
-                hint = "Connection refused usually means: wrong MySqlHost IP, MySQL not allowing remote connections, or Windows firewall blocking port 3306."
+                hint = "Connection refused usually means: wrong Server/host, SQL Server not allowing remote TCP connections, or firewall blocking port 1433."
             };
         }
     }

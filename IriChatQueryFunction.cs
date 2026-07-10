@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
-using MySqlConnector;
+using Microsoft.Data.SqlClient;
 
 public class IriChatQueryFunction
 {
@@ -129,7 +129,7 @@ public class IriChatQueryFunction
                 chart_type = chartType
             };
         }
-        catch (MySqlException ex)
+        catch (SqlException ex)
         {
             return new
             {
@@ -203,9 +203,9 @@ public class IriChatQueryFunction
     {
         var results = new List<Dictionary<string, object?>>();
 
-        await using var connection = new MySqlConnection(_sqlConnectionString);
+        await using var connection = new SqlConnection(_sqlConnectionString);
         await connection.OpenAsync();
-        await using var command = new MySqlCommand(sqlQuery, connection);
+        await using var command = new SqlCommand(sqlQuery, connection);
         await using var reader = await command.ExecuteReaderAsync();
 
         var columnNames = Enumerable.Range(0, reader.FieldCount)

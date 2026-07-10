@@ -3,9 +3,9 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "MySqlHost": "YOUR_WINDOWS_IP",
-    "SqlConnectionString": "Server=localhost;Port=3306;Database=your_database;User ID=your_user;Password=your_password;",
-    "OpenAIApiKey": "sk-your-openai-api-key",
+    "SqlServerHost": "",
+    "SqlConnectionString": "Server=YOUR_SERVER,1433;Database=YOUR_DATABASE;User ID=YOUR_USER;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True;",
+    "OpenAIApiKey": "YOUR_OPENAI_API_KEY",
     "OpenAIModel": "gpt-4o-mini"
   }
 }

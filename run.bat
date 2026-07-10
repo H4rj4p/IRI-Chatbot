@@ -13,7 +13,7 @@ if errorlevel 1 (
 if not exist local.settings.json (
   echo ERROR: local.settings.json is missing.
   echo Run: copy local.settings.example.json local.settings.json
-  echo Then edit it with your MySQL password and OpenAI key.
+  echo Then edit it with your SQL Server connection string and OpenAI key.
   exit /b 1
 )
 

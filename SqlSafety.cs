@@ -83,7 +83,32 @@ public static class SqlSafety
             .Trim()
             .TrimEnd(';');
 
-        return FixSurnamePrefixMatch(FixCustomersSchema(sql, actualTableName));
+        return ConvertLimitToTop(FixSurnamePrefixMatch(FixCustomersSchema(sql, actualTableName)));
+    }
+
+    /// <summary>
+    /// Converts trailing MySQL-style LIMIT n into SQL Server TOP n when needed.
+    /// </summary>
+    public static string ConvertLimitToTop(string sql)
+    {
+        var match = Regex.Match(sql, @"\s+LIMIT\s+(\d+)\s*$", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return sql;
+
+        string limit = match.Groups[1].Value;
+        string withoutLimit = sql[..match.Index].TrimEnd();
+
+        if (Regex.IsMatch(withoutLimit, @"^\s*SELECT\s+TOP\s*\(", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(withoutLimit, @"^\s*SELECT\s+TOP\s+\d+", RegexOptions.IgnoreCase))
+        {
+            return withoutLimit;
+        }
+
+        return Regex.Replace(
+            withoutLimit,
+            @"^\s*SELECT\b",
+            $"SELECT TOP {limit}",
+            RegexOptions.IgnoreCase);
     }
 
     public static string FixSurnamePrefixMatch(string sql)
@@ -110,7 +135,7 @@ public static class SqlSafety
 
         sql = Regex.Replace(
             sql,
-            @"(`?)(?:bank_data\.)?customers(`?)",
+            @"([`\[""]?)(?:bank_data\.)?customers([\]`""]?)",
             $"$1{actualTableName}$2",
             RegexOptions.IgnoreCase);
 

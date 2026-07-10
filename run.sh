@@ -12,7 +12,7 @@ fi
 if [ ! -f local.settings.json ]; then
   echo "ERROR: local.settings.json is missing."
   echo "Run: cp local.settings.example.json local.settings.json"
-  echo "Then edit it with your MySQL IP, password, and OpenAI key."
+  echo "Then edit it with your SQL Server connection string and OpenAI key."
   exit 1
 fi
 

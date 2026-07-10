@@ -1,26 +1,22 @@
 -- How old is someone by surname (prefix match — Hill matches Hill, not Chhill)
-SELECT CustomerId, Surname, Age
+SELECT TOP 5 CustomerId, Surname, Age
 FROM Customers
-WHERE Surname LIKE 'Hargrave%'
-LIMIT 5;
+WHERE Surname LIKE 'Hargrave%';
 
 -- Where is someone from (Geography)
-SELECT CustomerId, Surname, Geography
+SELECT TOP 1 CustomerId, Surname, Geography
 FROM Customers
-WHERE Surname LIKE 'Hargrave%'
-LIMIT 1;
+WHERE Surname LIKE 'Hargrave%';
 
 -- Credit score by surname
-SELECT CustomerId, Surname, CreditScore
+SELECT TOP 5 CustomerId, Surname, CreditScore
 FROM Customers
-WHERE Surname LIKE 'Hill%'
-LIMIT 5;
+WHERE Surname LIKE 'Hill%';
 
 -- Lookup by customer id
-SELECT CustomerId, Surname, Age, CreditScore
+SELECT TOP 1 CustomerId, Surname, Age, CreditScore
 FROM Customers
-WHERE CustomerId = 123456
-LIMIT 1;
+WHERE CustomerId = 123456;
 
 -- Average credit score by geography
 SELECT Geography, AVG(CreditScore) AS avg_credit_score
@@ -28,25 +24,22 @@ FROM Customers
 GROUP BY Geography;
 
 -- Compare credit scores between two customers
-SELECT CustomerId, Surname, CreditScore
+SELECT TOP 10 CustomerId, Surname, CreditScore
 FROM Customers
 WHERE Surname LIKE 'Hargrave%' OR Surname LIKE 'Hill%'
-ORDER BY CreditScore DESC
-LIMIT 10;
+ORDER BY CreditScore DESC;
 
 -- Compare ages between two customers
-SELECT CustomerId, Surname, Age
+SELECT TOP 10 CustomerId, Surname, Age
 FROM Customers
 WHERE Surname LIKE 'Hargrave%' OR Surname LIKE 'Hill%'
-ORDER BY Age DESC
-LIMIT 10;
+ORDER BY Age DESC;
 
 -- Who has the higher balance
-SELECT CustomerId, Surname, Balance
+SELECT TOP 10 CustomerId, Surname, Balance
 FROM Customers
 WHERE Surname LIKE 'Hargrave%' OR Surname LIKE 'Hill%'
-ORDER BY Balance DESC
-LIMIT 10;
+ORDER BY Balance DESC;
 
 -- Compound "and" question: total customers AND male count (answer both parts)
 SELECT
@@ -61,20 +54,18 @@ SELECT
 FROM Customers;
 
 -- Average salary AND five people closest to it (one query, no semicolon)
-SELECT
+SELECT TOP 5
   CustomerId,
   Surname,
   EstimatedSalary,
   (SELECT AVG(EstimatedSalary) FROM Customers) AS average_salary
 FROM Customers
-ORDER BY ABS(EstimatedSalary - (SELECT AVG(EstimatedSalary) FROM Customers))
-LIMIT 5;
+ORDER BY ABS(EstimatedSalary - (SELECT AVG(EstimatedSalary) FROM Customers));
 
 -- One person, multiple attributes: age AND credit score
-SELECT CustomerId, Surname, Age, CreditScore
+SELECT TOP 5 CustomerId, Surname, Age, CreditScore
 FROM Customers
-WHERE Surname LIKE 'Hargrave%'
-LIMIT 5;
+WHERE Surname LIKE 'Hargrave%';
 
 -- Three stats in one question: males, females, and average age
 SELECT
