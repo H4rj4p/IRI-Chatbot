@@ -5,8 +5,9 @@
 1. Install Python 3 and select **Add Python to PATH** during installation.
 2. Install **Microsoft ODBC Driver 18 for SQL Server**.
 3. Copy `local.settings.example.json` to `local.settings.json`.
-4. Edit `local.settings.json` and replace the SQL Server, database, username,
-   password, and OpenAI API key placeholders with real values.
+4. Edit `local.settings.json`. Server `VMWinSQLS`, database `Prohance`, and
+   user `VMWinSQLS` are pre-filled — replace `YOUR_PASSWORD` (and the OpenAI
+   API key if needed) with your real values.
 5. Double-click `start_iri_chatbot_7180.bat`.
 6. Open <http://localhost:7180/api/Chat> if it does not open automatically.
 
@@ -19,7 +20,7 @@ configuration location and connection error if the test fails.
 SQL authentication:
 
 ```text
-Driver={ODBC Driver 18 for SQL Server};Server=SERVER_NAME,1433;Database=DATABASE_NAME;User ID=USER_NAME;Password=PASSWORD;Encrypt=yes;TrustServerCertificate=yes;
+Driver={ODBC Driver 18 for SQL Server};Server=VMWinSQLS,1433;Database=Prohance;User ID=VMWinSQLS;Password=PASSWORD;Encrypt=yes;TrustServerCertificate=yes;
 ```
 
 Windows authentication:
