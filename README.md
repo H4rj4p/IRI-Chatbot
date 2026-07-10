@@ -26,8 +26,9 @@ Python Flask app (`app.pyw`) that talks to SQL Server and ChatGPT.
 }
 ```
 
-`172.18.0.4` is the SQL Server PC IP. Keep that value (do not use localhost).
-If the SQL port is not 1433, change the number after the comma.
+`172.18.0.4` is often a Docker/internal IP. If the DB will not connect from your PC,
+on the **SQL Server machine** run `ipconfig`, copy the Ethernet/Wi-Fi IPv4
+(usually `192.168.x.x` or `10.x.x.x`), and put that in `SqlServer` instead.
 
 When you start the app, the console should show `SQL settings loaded: True` and
 `SQL target: server=172.18.0.4,1433`. If it shows `False` / `(missing)`, the

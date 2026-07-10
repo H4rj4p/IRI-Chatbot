@@ -346,6 +346,7 @@ def get_settings_status():
         "hasOpenAIApiKey": bool(os.environ.get("OpenAIApiKey", "").strip())
         and os.environ.get("OpenAIApiKey", "").strip() not in {"YOUR_OPENAI_API_KEY"},
         "connection": get_connection_summary(),
+        "networkWarning": get_network_warning(),
     }
 
 
@@ -392,6 +393,18 @@ def get_sql_config_error():
             f"Drivers found: {drivers}"
         )
 
+    return None
+
+
+def get_network_warning():
+    values = parse_connection_string(get_connection_string() or "")
+    server_host = values.get("server", "").split(",", 1)[0].split("\\", 1)[0].strip()
+    if server_host.startswith(("172.16.", "172.17.", "172.18.", "172.19.", "172.2", "172.3")):
+        return (
+            f"SqlServer is {server_host}, which is often a Docker/internal IP that your PC cannot reach. "
+            "On the SQL Server PC run ipconfig and use the Ethernet/Wi-Fi IPv4 "
+            "(usually 192.168.x.x or 10.x.x.x), e.g. \"192.168.1.50,1433\"."
+        )
     return None
 
 
@@ -445,13 +458,16 @@ def explain_sql_error(exc):
             "no such host",
             "getaddrinfo",
             "could not translate",
+            "login timeout",
+            "hy000",
         )
     ):
         hints.append(
-            "Cannot reach SQL Server over the network. On this PC, SqlServer must be the "
-            "SQL machine's hostname or IP (not localhost), e.g. VMWinSQLS,1433 or 192.168.x.x,1433. "
-            "On the SQL Server PC: enable TCP/IP in SQL Server Configuration Manager, allow inbound "
-            "TCP 1433 in Windows Firewall, and confirm SQL Server Authentication / mixed mode is on."
+            "Cannot reach SQL Server from this PC. "
+            "172.18.x.x addresses are usually Docker/internal and often do not work from a normal Windows PC. "
+            "On the SQL Server machine run ipconfig, copy the Ethernet/Wi-Fi IPv4 (usually 192.168.x.x or 10.x.x.x), "
+            "put that in SqlServer like \"192.168.1.50,1433\", then restart python app.pyw. "
+            "Also on the SQL Server PC: enable TCP/IP, allow firewall TCP 1433, enable SQL authentication."
         )
     if "certificate" in lower or "ssl" in lower:
         hints.append(
@@ -503,6 +519,9 @@ def print_startup_config():
     config_error = get_config_error()
     if config_error:
         print(f"Config problem: {config_error}")
+    network_warning = get_network_warning()
+    if network_warning:
+        print(f"Network warning: {network_warning}")
     elif not status["hasSqlConnectionString"]:
         print(
             "Config problem: No SQL Server address found. "

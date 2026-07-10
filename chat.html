@@ -392,6 +392,9 @@
           const details = [
             data.error || data.message || "Unknown connection error",
             data.hint ? `\nFix: ${data.hint}` : "",
+            data.config && data.config.networkWarning
+              ? `\n\nNetwork: ${data.config.networkWarning}`
+              : "",
             connection.server ? `\n\nServer: ${connection.server}` : "",
             connection.database ? `\nDatabase: ${connection.database}` : "",
             connection.user ? `\nUser: ${connection.user}` : "",
