@@ -333,12 +333,13 @@ def get_settings_status():
         "settingsLoadError": LOCAL_SETTINGS_ERROR,
         "settingsWarnings": list(LOCAL_SETTINGS_WARNINGS),
         "hasSqlConnectionString": bool(get_connection_string()),
-        "hasOpenAIApiKey": bool(os.environ.get("OpenAIApiKey", "").strip()),
+        "hasOpenAIApiKey": bool(os.environ.get("OpenAIApiKey", "").strip())
+        and os.environ.get("OpenAIApiKey", "").strip() not in {"YOUR_OPENAI_API_KEY"},
         "connection": get_connection_summary(),
     }
 
 
-def get_config_error():
+def get_sql_config_error():
     if LOCAL_SETTINGS_ERROR:
         return LOCAL_SETTINGS_ERROR
 
@@ -373,10 +374,6 @@ def get_config_error():
                 "Replace it in local.settings.json with your SQL Server details."
             )
 
-    api_key = os.environ.get("OpenAIApiKey", "").strip()
-    if api_key in {"", "YOUR_OPENAI_API_KEY"}:
-        return "OpenAIApiKey is still a placeholder. Add your ChatGPT/OpenAI API key to local.settings.json."
-
     drivers = list_odbc_drivers()
     if pyodbc is not None and drivers and not any("SQL Server" in driver for driver in drivers):
         return (
@@ -386,6 +383,20 @@ def get_config_error():
         )
 
     return None
+
+
+def get_openai_config_error():
+    api_key = os.environ.get("OpenAIApiKey", "").strip()
+    if api_key in {"", "YOUR_OPENAI_API_KEY"}:
+        return (
+            "OpenAIApiKey is still a placeholder. In local.settings.json set "
+            '"OpenAIApiKey": "sk-..." with your real ChatGPT/OpenAI key, then restart: python app.pyw'
+        )
+    return None
+
+
+def get_config_error():
+    return get_sql_config_error() or get_openai_config_error()
 
 
 def explain_sql_error(exc):
@@ -1321,7 +1332,7 @@ def test_sql_connection():
             }
         )
 
-    config_error = get_config_error()
+    config_error = get_sql_config_error()
     if config_error:
         return jsonify(
             {
@@ -1386,12 +1397,22 @@ def ask_question():
             }
         )
 
-    config_error = get_config_error()
+    config_error = get_sql_config_error()
     if config_error:
         return jsonify(
             {
                 "answer": "Database config needs to be updated before I can answer.",
                 "error": config_error,
+                "config": get_settings_status(),
+            }
+        )
+
+    openai_error = get_openai_config_error()
+    if openai_error:
+        return jsonify(
+            {
+                "answer": "ChatGPT is not set up yet.",
+                "error": openai_error,
                 "config": get_settings_status(),
             }
         )
