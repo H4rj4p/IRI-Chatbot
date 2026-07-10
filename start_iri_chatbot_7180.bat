@@ -23,10 +23,14 @@ goto :ready
 
 :ready
 if not exist "local.settings.json" (
-  echo local.settings.json is missing.
-  echo Copy local.settings.example.json to local.settings.json and enter your SQL Server details.
-  pause
-  exit /b 1
+  if exist "local.settings.example.json" (
+    echo Creating local.settings.json from local.settings.example.json...
+    copy /Y "local.settings.example.json" "local.settings.json" >nul
+  ) else (
+    echo local.settings.json is missing.
+    pause
+    exit /b 1
+  )
 )
 
 %RUN_PYTHON% -c "import flask, pyodbc, requests" >nul 2>nul

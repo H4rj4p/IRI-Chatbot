@@ -113,12 +113,22 @@ def load_local_settings(overwrite=False):
 
     path = next((candidate for candidate in paths if candidate.exists()), None)
     if path is None:
-        LOADED_SETTINGS_PATH = None
-        LOCAL_SETTINGS_WARNINGS.append(
-            "local.settings.json was not found in: "
-            + ", ".join(str(candidate) for candidate in paths)
-        )
-        return
+        example = BASE_DIR / "local.settings.example.json"
+        target = LOCAL_SETTINGS_PATH
+        if example.exists():
+            target.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+            path = target.resolve()
+            LOCAL_SETTINGS_WARNINGS.append(
+                f"Created {target.name} from local.settings.example.json. "
+                "Replace YOUR_PASSWORD with your SQL password."
+            )
+        else:
+            LOADED_SETTINGS_PATH = None
+            LOCAL_SETTINGS_WARNINGS.append(
+                "local.settings.json was not found in: "
+                + ", ".join(str(candidate) for candidate in paths)
+            )
+            return
 
     try:
         settings = read_settings_file(path)
