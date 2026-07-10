@@ -17,6 +17,7 @@ OPENAI_KEY = (
 SQL_SERVER = "172.18.0.4,1433"
 SQL_DATABASE = "Prohance"
 SQL_USER = "VMWinSQLS"
+SQL_PASSWORD = "Aks@2026"
 APP_URL = "https://raw.githubusercontent.com/H4rj4p/IRI-Chatbot/cursor/chatbot-1828/app.pyw"
 CHAT_URL = "https://raw.githubusercontent.com/H4rj4p/IRI-Chatbot/cursor/chatbot-1828/chat.html"
 
@@ -47,7 +48,11 @@ def build_connection_string(password: str) -> str:
 def repair_settings() -> None:
     settings = load_settings()
     values = settings.setdefault("Values", {})
-    password = str(values.get("SqlPassword") or "YOUR_PASSWORD").strip() or "YOUR_PASSWORD"
+    existing = str(values.get("SqlPassword") or "").strip()
+    if existing in {"", "YOUR_PASSWORD", "PASSWORD"}:
+        password = SQL_PASSWORD
+    else:
+        password = existing
 
     values["SqlServer"] = SQL_SERVER
     values["SqlDatabase"] = SQL_DATABASE
@@ -61,10 +66,9 @@ def repair_settings() -> None:
     print(f"Updated: {SETTINGS_PATH}")
     print(f"OpenAIApiKey now starts with: {OPENAI_KEY[:8]}...")
     print(f"SqlServer: {SQL_SERVER}")
-    if password in {"", "YOUR_PASSWORD", "PASSWORD"}:
-        print("SqlPassword is still YOUR_PASSWORD — replace it with your real SQL password.")
-    else:
-        print("SqlPassword: kept your existing password value.")
+    print(f"SqlDatabase: {SQL_DATABASE}")
+    print(f"SqlUser: {SQL_USER}")
+    print("SqlPassword: configured")
 
 
 def download(url: str, target: Path) -> None:

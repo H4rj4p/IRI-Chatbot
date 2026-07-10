@@ -119,8 +119,8 @@ def load_local_settings(overwrite=False):
             target.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
             path = target.resolve()
             LOCAL_SETTINGS_WARNINGS.append(
-                f"Created {target.name} from local.settings.example.json. "
-                "Replace YOUR_PASSWORD with your SQL password."
+                f"Created {target.name} from local.settings.example.json "
+                "with the bundled SQL Server and OpenAI settings."
             )
         else:
             LOADED_SETTINGS_PATH = None

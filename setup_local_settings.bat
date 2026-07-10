@@ -10,11 +10,17 @@ if not exist "local.settings.example.json" (
 
 copy /Y "local.settings.example.json" "local.settings.json" >nul
 echo.
-echo Updated local.settings.json with the saved OpenAI key and SQL Server settings.
+echo Updated local.settings.json with SQL Server and OpenAI settings:
+echo   Server:   172.18.0.4,1433
+echo   Database: Prohance
+echo   User:     VMWinSQLS
+echo   Password: configured
 echo.
-echo NEXT: open local.settings.json and replace YOUR_PASSWORD with your SQL password
-echo in BOTH SqlPassword and SqlConnectionString.
+echo If 172.18.0.4 is unreachable from your PC, on the SQL Server machine
+echo run ipconfig and put the Ethernet/Wi-Fi IPv4 into SqlServer instead.
 echo.
 echo Then run: python app.pyw
+echo Test:     http://localhost:7179/api/TestSqlConnection
+echo Chat:     http://localhost:7179/api/Chat
 echo.
 pause
