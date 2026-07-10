@@ -1,7 +1,7 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "SqlServer": "VMWinSQLS,1433",
+    "SqlServer": "172.18.0.4,1433",
     "SqlDatabase": "Prohance",
     "SqlUser": "VMWinSQLS",
     "SqlPassword": "YOUR_PASSWORD",
