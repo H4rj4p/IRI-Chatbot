@@ -1,18 +1,34 @@
 # IRI AI Chatbot
 
+Python Flask app (`app.pyw`) that talks to SQL Server and ChatGPT.
+
 ## Windows setup
 
 1. Install Python 3 and select **Add Python to PATH** during installation.
 2. Install **Microsoft ODBC Driver 18 for SQL Server**.
-3. Copy `local.settings.example.json` to `local.settings.json`.
+3. Copy `local.settings.example.json` to `local.settings.json` if you do not
+   already have one.
 4. Edit `local.settings.json`. Server `VMWinSQLS`, database `Prohance`, and
    user `VMWinSQLS` are pre-filled — replace `YOUR_PASSWORD` (and the OpenAI
    API key if needed) with your real values.
-5. Double-click `start_iri_chatbot_7180.bat`.
-6. Open <http://localhost:7180/api/Chat> if it does not open automatically.
+5. Install packages once:
 
-The launcher installs the Python packages in `requirements.txt` when they are
-missing. The page tests the SQL Server connection when it loads and shows the
+```text
+pip install -r requirements.txt
+```
+
+6. Run the app:
+
+```text
+python app.pyw
+```
+
+Or double-click `start_iri_chatbot_7180.bat` (same thing; uses port 7180).
+
+7. Open <http://localhost:7179/api/Chat> (or <http://localhost:7180/api/Chat>
+   if you used the `.bat` launcher).
+
+The page tests the SQL Server connection when it loads and shows the
 configuration location and connection error if the test fails.
 
 ## SQL Server connection examples
@@ -44,7 +60,7 @@ template, and create a private `local.settings.json` on each computer.
 With the app running, visit:
 
 ```text
-http://localhost:7180/api/TestSqlConnection
+http://localhost:7179/api/TestSqlConnection
 ```
 
 A successful response includes `"success": true`, the connected database name,
