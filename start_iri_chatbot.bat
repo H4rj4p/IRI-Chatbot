@@ -1,7 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set PORT=7180
+set PORT=7179
+set HOST=127.0.0.1
 
 where python >nul 2>nul
 if not errorlevel 1 goto :have_python
@@ -44,13 +45,17 @@ if errorlevel 1 (
   )
 )
 
-echo Starting IRI AI at http://localhost:%PORT%/api/Chat
-echo Or run manually with: python app.pyw
 echo.
-echo If SQL fails with handshake / 172.18.x.x: on the SQL Server PC run ipconfig,
-echo use the Ethernet/Wi-Fi IPv4 in SqlServer (usually 192.168.x.x), then restart.
+echo IMPORTANT: This chatbot must run on a PC that can reach SQL Server.
+echo 172.18.0.4 is usually Docker/internal and often fails from another machine.
+echo On the SQL Server PC, run ipconfig and put the Ethernet/Wi-Fi IPv4 into
+echo local.settings.json as SqlServer, e.g. 192.168.1.50,1433
+echo.
+echo Starting IRI AI at http://localhost:%PORT%/api/Chat
+echo SQL test: http://localhost:%PORT%/api/TestSqlConnection
 echo.
 start "" "http://localhost:%PORT%/api/Chat"
 set PORT=%PORT%
+set HOST=%HOST%
 %RUN_PYTHON% app.pyw
 pause
