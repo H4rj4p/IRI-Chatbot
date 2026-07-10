@@ -119,8 +119,8 @@ def load_local_settings(overwrite=False):
             target.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
             path = target.resolve()
             LOCAL_SETTINGS_WARNINGS.append(
-                f"Created {target.name} from local.settings.example.json. "
-                "Replace YOUR_PASSWORD with your SQL password."
+                f"Created {target.name} from local.settings.example.json "
+                "with the bundled SQL Server and OpenAI settings."
             )
         else:
             LOADED_SETTINGS_PATH = None
@@ -426,6 +426,7 @@ def explain_sql_error(exc):
     message = str(exc)
     lower = message.lower()
     hints = []
+    network_warning = get_network_warning()
 
     if "im002" in lower or "data source name not found" in lower or (
         "driver" in lower and "not found" in lower
@@ -445,7 +446,16 @@ def explain_sql_error(exc):
         )
     if "cannot open database" in lower:
         hints.append("Database name may be wrong. Confirm SqlDatabase is exactly Prohance.")
-    if any(
+    if "handshakes before login" in lower or ("08001" in lower and "26)" in message):
+        hints.append(
+            "TCP reached the address, but SQL Server never completed the login handshake. "
+            "That usually means 172.18.x.x is a Docker/internal IP (or a blackhole), not a "
+            "reachable SQL Server from this machine. "
+            "Run this chatbot on a Windows PC that can reach the SQL Server VM, and set "
+            "SqlServer to the SQL PC Ethernet/Wi-Fi IPv4 from ipconfig "
+            "(usually 192.168.x.x or 10.x.x.x), e.g. \"192.168.1.50,1433\"."
+        )
+    elif any(
         token in lower
         for token in (
             "could not open a connection",
@@ -473,6 +483,8 @@ def explain_sql_error(exc):
         hints.append(
             "TLS/certificate issue. Keep Encrypt=yes and TrustServerCertificate=yes."
         )
+    if network_warning and network_warning not in " ".join(hints):
+        hints.append(network_warning)
     if not hints:
         hints.append(
             "Check SqlServer, SqlDatabase, SqlUser, SqlPassword, ODBC Driver 18, "
