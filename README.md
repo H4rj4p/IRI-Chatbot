@@ -24,8 +24,11 @@ Python Flask app (`app.pyw`) that talks to SQL Server and ChatGPT.
 }
 ```
 
-If the chatbot runs on the same PC as SQL Server and `VMWinSQLS` fails, try
-`"SqlServer": "localhost,1433"`.
+If the chatbot runs on a different PC from SQL Server, keep
+`"SqlServer": "VMWinSQLS,1433"`. If that hostname does not resolve on your PC,
+use the SQL Server PC's IPv4 address instead, for example `"10.0.0.50,1433"`.
+
+Do **not** use `localhost` unless the chatbot and SQL Server are on the same machine.
 
 5. Install packages once:
 
@@ -49,9 +52,10 @@ window. After any settings change, stop the app with Ctrl+C and run
 
 - **Password still placeholder** — replace `YOUR_PASSWORD` in `SqlPassword`.
 - **Login failed** — wrong `SqlUser` / `SqlPassword`, or that login cannot use `Prohance`.
-- **Could not open a connection / TCP Provider** — wrong server name, SQL TCP/IP
-  disabled, or firewall blocking 1433. Try `localhost,1433` on the SQL Server PC.
-- **ODBC driver not found** — install ODBC Driver 18 for SQL Server.
+- **Could not open a connection / TCP Provider** — your PC cannot reach the SQL Server.
+  Use the SQL Server hostname or IP (not localhost). On the SQL Server PC, enable TCP/IP,
+  open firewall port 1433, and allow remote SQL logins (mixed mode).
+- **ODBC driver not found** — install ODBC Driver 18 for SQL Server on the chatbot PC.
 
 ## Configuration safety
 

@@ -400,12 +400,16 @@ def explain_sql_error(exc):
             "named pipes provider",
             "connection timed out",
             "actively refused",
+            "no such host",
+            "getaddrinfo",
+            "could not translate",
         )
     ):
         hints.append(
-            "Cannot reach the SQL Server host. If the chatbot runs on the same PC as SQL Server, "
-            'try SqlServer value "localhost,1433" or "." . Also enable TCP/IP in SQL Server '
-            "Configuration Manager and allow port 1433 through Windows Firewall."
+            "Cannot reach SQL Server over the network. On this PC, SqlServer must be the "
+            "SQL machine's hostname or IP (not localhost), e.g. VMWinSQLS,1433 or 192.168.x.x,1433. "
+            "On the SQL Server PC: enable TCP/IP in SQL Server Configuration Manager, allow inbound "
+            "TCP 1433 in Windows Firewall, and confirm SQL Server Authentication / mixed mode is on."
         )
     if "certificate" in lower or "ssl" in lower:
         hints.append(
