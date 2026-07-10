@@ -1,0 +1,50 @@
+# IRI AI Chatbot
+
+## Windows setup
+
+1. Install Python 3 and select **Add Python to PATH** during installation.
+2. Install **Microsoft ODBC Driver 18 for SQL Server**.
+3. Copy `local.settings.example.json` to `local.settings.json`.
+4. Edit `local.settings.json` and replace the SQL Server, database, username,
+   password, and OpenAI API key placeholders with real values.
+5. Double-click `start_iri_chatbot_7180.bat`.
+6. Open <http://localhost:7180/api/Chat> if it does not open automatically.
+
+The launcher installs the Python packages in `requirements.txt` when they are
+missing. The page tests the SQL Server connection when it loads and shows the
+configuration location and connection error if the test fails.
+
+## SQL Server connection examples
+
+SQL authentication:
+
+```text
+Driver={ODBC Driver 18 for SQL Server};Server=SERVER_NAME,1433;Database=DATABASE_NAME;User ID=USER_NAME;Password=PASSWORD;Encrypt=yes;TrustServerCertificate=yes;
+```
+
+Windows authentication:
+
+```text
+Driver={ODBC Driver 18 for SQL Server};Server=SERVER_NAME;Database=DATABASE_NAME;Trusted_Connection=yes;Encrypt=yes;TrustServerCertificate=yes;
+```
+
+For a named SQL Server instance, use `Server=SERVER_NAME\\INSTANCE_NAME`.
+SQL Server must allow TCP connections, and its configured port must be allowed
+through the Windows firewall.
+
+## Configuration safety
+
+`local.settings.json` is intentionally excluded from Git because it contains
+passwords and API keys. Commit `local.settings.example.json` as the configuration
+template, and create a private `local.settings.json` on each computer.
+
+## Connection test
+
+With the app running, visit:
+
+```text
+http://localhost:7180/api/TestSqlConnection
+```
+
+A successful response includes `"success": true`, the connected database name,
+and the SQL Server version.
