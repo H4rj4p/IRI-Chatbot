@@ -386,10 +386,24 @@
         } else {
           status.textContent = "DB not connected";
           status.className = "bad";
-          const config = data.config
-            ? `\n\nConfig checked:\n${JSON.stringify(data.config, null, 2)}`
-            : "";
-          addBot(`The database isn't connected yet.\n\n${data.error || data.message}${config}`);
+          const connection = data.config && data.config.connection
+            ? data.config.connection
+            : {};
+          const details = [
+            data.error || data.message || "Unknown connection error",
+            data.hint ? `\nFix: ${data.hint}` : "",
+            connection.server ? `\n\nServer: ${connection.server}` : "",
+            connection.database ? `\nDatabase: ${connection.database}` : "",
+            connection.user ? `\nUser: ${connection.user}` : "",
+            typeof connection.passwordSet === "boolean"
+              ? `\nPassword set: ${connection.passwordSet ? "yes" : "NO - still placeholder"}`
+              : "",
+            data.config && data.config.settingsPath
+              ? `\nSettings file: ${data.config.settingsPath}`
+              : "",
+            "\n\nAfter editing local.settings.json, stop the app (Ctrl+C) and run: python app.pyw",
+          ].join("");
+          addBot(`The database isn't connected yet.\n\n${details}`);
         }
       } catch {
         status.textContent = "App not running";

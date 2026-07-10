@@ -1,8 +1,10 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "SqlServerHost": "",
-    "SqlConnectionString": "Driver={ODBC Driver 18 for SQL Server};Server=VMWinSQLS,1433;Database=Prohance;User ID=VMWinSQLS;Password=YOUR_PASSWORD;Encrypt=yes;TrustServerCertificate=yes;",
+    "SqlServer": "VMWinSQLS,1433",
+    "SqlDatabase": "Prohance",
+    "SqlUser": "VMWinSQLS",
+    "SqlPassword": "YOUR_PASSWORD",
     "OpenAIApiKey": "YOUR_OPENAI_API_KEY",
     "OpenAIModel": "gpt-4o-mini"
   }

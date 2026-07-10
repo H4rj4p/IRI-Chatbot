@@ -8,9 +8,25 @@ Python Flask app (`app.pyw`) that talks to SQL Server and ChatGPT.
 2. Install **Microsoft ODBC Driver 18 for SQL Server**.
 3. Copy `local.settings.example.json` to `local.settings.json` if you do not
    already have one.
-4. Edit `local.settings.json`. Server `VMWinSQLS`, database `Prohance`, and
-   user `VMWinSQLS` are pre-filled — replace `YOUR_PASSWORD` (and the OpenAI
-   API key if needed) with your real values.
+4. Edit `local.settings.json` and set your password:
+
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "SqlServer": "VMWinSQLS,1433",
+    "SqlDatabase": "Prohance",
+    "SqlUser": "VMWinSQLS",
+    "SqlPassword": "your-real-password",
+    "OpenAIApiKey": "your-openai-key",
+    "OpenAIModel": "gpt-4o-mini"
+  }
+}
+```
+
+If the chatbot runs on the same PC as SQL Server and `VMWinSQLS` fails, try
+`"SqlServer": "localhost,1433"`.
+
 5. Install packages once:
 
 ```text
@@ -23,45 +39,27 @@ pip install -r requirements.txt
 python app.pyw
 ```
 
-Or double-click `start_iri_chatbot_7180.bat` (same thing; uses port 7180).
+7. Open <http://localhost:7179/api/Chat>
 
-7. Open <http://localhost:7179/api/Chat> (or <http://localhost:7180/api/Chat>
-   if you used the `.bat` launcher).
+If the page says the database is not connected, read the error/hint in the chat
+window. After any settings change, stop the app with Ctrl+C and run
+`python app.pyw` again.
 
-The page tests the SQL Server connection when it loads and shows the
-configuration location and connection error if the test fails.
+## Common connection fixes
 
-## SQL Server connection examples
-
-SQL authentication:
-
-```text
-Driver={ODBC Driver 18 for SQL Server};Server=VMWinSQLS,1433;Database=Prohance;User ID=VMWinSQLS;Password=PASSWORD;Encrypt=yes;TrustServerCertificate=yes;
-```
-
-Windows authentication:
-
-```text
-Driver={ODBC Driver 18 for SQL Server};Server=SERVER_NAME;Database=DATABASE_NAME;Trusted_Connection=yes;Encrypt=yes;TrustServerCertificate=yes;
-```
-
-For a named SQL Server instance, use `Server=SERVER_NAME\\INSTANCE_NAME`.
-SQL Server must allow TCP connections, and its configured port must be allowed
-through the Windows firewall.
+- **Password still placeholder** — replace `YOUR_PASSWORD` in `SqlPassword`.
+- **Login failed** — wrong `SqlUser` / `SqlPassword`, or that login cannot use `Prohance`.
+- **Could not open a connection / TCP Provider** — wrong server name, SQL TCP/IP
+  disabled, or firewall blocking 1433. Try `localhost,1433` on the SQL Server PC.
+- **ODBC driver not found** — install ODBC Driver 18 for SQL Server.
 
 ## Configuration safety
 
-`local.settings.json` is intentionally excluded from Git because it contains
-passwords and API keys. Commit `local.settings.example.json` as the configuration
-template, and create a private `local.settings.json` on each computer.
+`local.settings.json` is gitignored because it contains passwords and API keys.
+Keep secrets only in that local file.
 
 ## Connection test
-
-With the app running, visit:
 
 ```text
 http://localhost:7179/api/TestSqlConnection
 ```
-
-A successful response includes `"success": true`, the connected database name,
-and the SQL Server version.
