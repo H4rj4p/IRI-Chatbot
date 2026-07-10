@@ -506,6 +506,15 @@ def print_startup_config():
         f"SqlConnectionString={bool(os.environ.get('SqlConnectionString', '').strip())}, "
         f"OpenAIApiKey={bool(os.environ.get('OpenAIApiKey', '').strip())}"
     )
+    api_key = os.environ.get("OpenAIApiKey", "").strip()
+    if not api_key:
+        print("OpenAIApiKey value: (missing)")
+    elif api_key in {"YOUR_OPENAI_API_KEY"}:
+        print("OpenAIApiKey value: YOUR_OPENAI_API_KEY  <-- still placeholder, replace with sk-...")
+    elif api_key.startswith("sk-"):
+        print(f"OpenAIApiKey value: {api_key[:8]}...{api_key[-4:]} (looks valid)")
+    else:
+        print("OpenAIApiKey value: set, but does not start with sk-")
     print(f"SQL settings loaded: {status['hasSqlConnectionString']}")
     print(f"OpenAIApiKey loaded: {status['hasOpenAIApiKey']}")
     connection = status.get("connection") or {}
