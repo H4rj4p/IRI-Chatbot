@@ -141,6 +141,27 @@ def load_local_settings(overwrite=False):
     for name, value in values.items():
         set_env_value(aliases.get(name, name), value, overwrite=overwrite)
 
+    # If the file only has SqlServer/SqlDatabase/SqlUser/SqlPassword, build a
+    # full SqlConnectionString so older and newer code paths both work.
+    if not str(os.environ.get("SqlConnectionString", "")).strip():
+        server = (
+            str(os.environ.get("SqlServerHost", "")).strip()
+            or str(os.environ.get("SqlServer", "")).strip()
+        )
+        database = str(os.environ.get("SqlDatabase", "")).strip()
+        user = str(os.environ.get("SqlUser", "")).strip()
+        password = str(os.environ.get("SqlPassword", "")).strip()
+        if server:
+            built = (
+                "Driver={ODBC Driver 18 for SQL Server};"
+                f"Server={server};"
+                f"Database={database};"
+                f"User ID={user};"
+                f"Password={password};"
+                "Encrypt=yes;TrustServerCertificate=yes;"
+            )
+            set_env_value("SqlConnectionString", built, overwrite=overwrite)
+
 
 def reload_local_settings():
     """Re-read local.settings.json so password edits apply without a full restart."""
@@ -438,6 +459,16 @@ def print_startup_config():
         print(f"Settings load error: {status['settingsLoadError']}")
     for warning in status["settingsWarnings"]:
         print(f"Settings warning: {warning}")
+
+    print(
+        "Settings keys present: "
+        f"SqlServer={bool(os.environ.get('SqlServer', '').strip())}, "
+        f"SqlDatabase={bool(os.environ.get('SqlDatabase', '').strip())}, "
+        f"SqlUser={bool(os.environ.get('SqlUser', '').strip())}, "
+        f"SqlPassword={bool(os.environ.get('SqlPassword', '').strip())}, "
+        f"SqlConnectionString={bool(os.environ.get('SqlConnectionString', '').strip())}, "
+        f"OpenAIApiKey={bool(os.environ.get('OpenAIApiKey', '').strip())}"
+    )
     print(f"SQL settings loaded: {status['hasSqlConnectionString']}")
     print(f"OpenAIApiKey loaded: {status['hasOpenAIApiKey']}")
     connection = status.get("connection") or {}
@@ -451,6 +482,12 @@ def print_startup_config():
     config_error = get_config_error()
     if config_error:
         print(f"Config problem: {config_error}")
+    elif not status["hasSqlConnectionString"]:
+        print(
+            "Config problem: No SQL Server address found. "
+            "Put SqlServer/SqlDatabase/SqlUser/SqlPassword (or SqlConnectionString) "
+            "in local.settings.json."
+        )
 
 
 def open_sql_server_connection():
