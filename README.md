@@ -25,16 +25,18 @@ cp local.settings.example.json local.settings.json
 | `SqlServerHost` | Optional host override; leave blank to use `Server=` from the connection string |
 | `OpenAIModel` | Defaults to `gpt-4o-mini` |
 
+This project is configured for SQL Server `VMWinSQLS` / database `Prohance`. Replace `YOUR_USER`, `YOUR_PASSWORD`, and `YOUR_OPENAI_API_KEY` yourself.
+
 SQL authentication example:
 
 ```text
-Server=YOUR_SERVER,1433;Database=bank_data;User ID=YOUR_USER;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True;
+Server=VMWinSQLS,1433;Database=Prohance;User ID=YOUR_USER;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True;
 ```
 
 Windows authentication example:
 
 ```text
-Server=YOUR_SERVER;Database=bank_data;Integrated Security=True;Encrypt=True;TrustServerCertificate=True;
+Server=VMWinSQLS;Database=Prohance;Integrated Security=True;Encrypt=True;TrustServerCertificate=True;
 ```
 
 `local.settings.json` is gitignored so passwords and API keys stay private.

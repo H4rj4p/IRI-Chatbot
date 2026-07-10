@@ -4,7 +4,7 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
     "SqlServerHost": "",
-    "SqlConnectionString": "Server=YOUR_SERVER,1433;Database=YOUR_DATABASE;User ID=YOUR_USER;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True;",
+    "SqlConnectionString": "Server=VMWinSQLS,1433;Database=Prohance;User ID=YOUR_USER;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True;",
     "OpenAIApiKey": "YOUR_OPENAI_API_KEY",
     "OpenAIModel": "gpt-4o-mini"
   }

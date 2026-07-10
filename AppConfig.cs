@@ -9,7 +9,7 @@ public static class AppConfig
 
     private static readonly string[] PlaceholderTokens =
     {
-        "YOUR_SERVER", "YOUR_DATABASE", "YOUR_USER", "YOUR_PASSWORD", "YOUR_OPENAI_API_KEY"
+        "YOUR_SERVER", "YOUR_DATABASE", "YOUR_USER", "YOUR_PASSWORD", "YOUR_OPENAI_API_KEY", "sk-your-openai"
     };
 
     public static string? GetSqlConnectionString()
