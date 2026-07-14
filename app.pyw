@@ -771,8 +771,17 @@ def open_sql_server_connection():
     seen = set()
     if WORKING_SQL_SERVER:
         _add_server_candidate(candidates, seen, WORKING_SQL_SERVER)
-    for server in alternate_sql_servers(configured_server) or [configured_server]:
-        _add_server_candidate(candidates, seen, server)
+
+    try_alternates = os.environ.get("SqlTryAlternates", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+    if try_alternates:
+        for server in alternate_sql_servers(configured_server) or [configured_server]:
+            _add_server_candidate(candidates, seen, server)
+    else:
+        _add_server_candidate(candidates, seen, configured_server or "127.0.0.1,1433")
 
     errors = []
     connect_timeout = int(os.environ.get("SqlConnectTimeout", "8"))
@@ -1609,6 +1618,21 @@ def build_compact_result_answer(question, results):
     return f"I found {row_count} matching {noun}."
 
 
+@app.route("/api/Health", methods=["GET"])
+def health():
+    """Fast liveness check so the chat UI can appear without waiting on SQL."""
+    return jsonify(
+        {
+            "success": True,
+            "ok": True,
+            "message": "IRI AI is running on localhost.",
+            "chatUrl": f"http://127.0.0.1:{int(os.environ.get('PORT', '7179'))}/api/Chat",
+            "settingsLoaded": bool(LOADED_SETTINGS_PATH),
+            "hasSqlSettings": bool(get_connection_string()),
+        }
+    )
+
+
 @app.route("/api/Chat", methods=["GET"])
 def chat():
     path = BASE_DIR / "chat.html"
@@ -1639,62 +1663,77 @@ def access_info():
 @app.route("/api/TestSqlConnection", methods=["GET", "POST"])
 def test_sql_connection():
     reload_local_settings()
-
-    if get_connection_string() is None:
-        return jsonify(
-            {
-                "success": False,
-                "message": "SQL Server settings are not loaded.",
-                "error": (
-                    "Check that local.settings.json is beside app.pyw and contains "
-                    "SqlServer / SqlDatabase / SqlUser / SqlPassword "
-                    "(or a full SqlConnectionString)."
-                ),
-                "hint": "Create or repair local.settings.json beside app.pyw (run repair_settings.bat).",
-                "config": get_settings_status(),
-            }
-        )
-
-    config_error = get_sql_config_error()
-    if config_error:
-        return jsonify(
-            {
-                "success": False,
-                "message": "Database config needs to be updated.",
-                "error": config_error,
-                "hint": "Edit local.settings.json, save it, then restart: python app.pyw",
-                "config": get_settings_status(),
-            }
-        )
+    quick = str(request.args.get("quick", "")).lower() in {"1", "true", "yes"}
+    previous_timeout = os.environ.get("SqlConnectTimeout")
+    if quick:
+        os.environ["SqlConnectTimeout"] = os.environ.get("SqlConnectTimeoutQuick", "2")
+        os.environ["SqlTryAlternates"] = "0"
 
     try:
-        with open_sql_server_connection() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName")
-                rows = rows_as_dicts(cursor)
-                row = rows[0] if rows else {}
+        if get_connection_string() is None:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "SQL Server settings are not loaded.",
+                    "error": (
+                        "Check that local.settings.json is beside app.pyw and contains "
+                        "SqlServer / SqlDatabase / SqlUser / SqlPassword "
+                        "(or a full SqlConnectionString)."
+                    ),
+                    "hint": "Create or repair local.settings.json beside app.pyw (run repair_settings.bat).",
+                    "config": get_settings_status(),
+                }
+            )
 
-        summary = get_connection_summary()
-        return jsonify(
-            {
-                "success": True,
-                "message": "Connected to SQL Server successfully.",
-                "server": summary.get("server", ""),
-                "database": row.get("DatabaseName", ""),
-                "serverVersion": row.get("ServerVersion", ""),
-                "config": get_settings_status(),
-            }
-        )
-    except Exception as exc:
-        return jsonify(
-            {
-                "success": False,
-                "message": "Failed to connect to SQL Server.",
-                "error": str(exc),
-                "hint": explain_sql_error(exc),
-                "config": get_settings_status(),
-            }
-        )
+        config_error = get_sql_config_error()
+        if config_error:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Database config needs to be updated.",
+                    "error": config_error,
+                    "hint": "Edit local.settings.json, save it, then restart: python app.pyw",
+                    "config": get_settings_status(),
+                }
+            )
+
+        try:
+            with open_sql_server_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName"
+                    )
+                    rows = rows_as_dicts(cursor)
+                    row = rows[0] if rows else {}
+
+            summary = get_connection_summary()
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "Connected to SQL Server successfully.",
+                    "server": summary.get("server", ""),
+                    "database": row.get("DatabaseName", ""),
+                    "serverVersion": row.get("ServerVersion", ""),
+                    "config": get_settings_status(),
+                }
+            )
+        except Exception as exc:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Failed to connect to SQL Server.",
+                    "error": str(exc),
+                    "hint": explain_sql_error(exc),
+                    "config": get_settings_status(),
+                }
+            )
+    finally:
+        if quick:
+            if previous_timeout is None:
+                os.environ.pop("SqlConnectTimeout", None)
+            else:
+                os.environ["SqlConnectTimeout"] = previous_timeout
+            os.environ.pop("SqlTryAlternates", None)
 
 
 @app.route("/api/AskQuestion", methods=["POST"])
@@ -1844,13 +1883,23 @@ def ask_question():
 
 
 if __name__ == "__main__":
+    import threading
+    import webbrowser
+
     port = int(os.environ.get("PORT", "7179"))
-    host = os.environ.get("HOST", "0.0.0.0")
+    host = os.environ.get("HOST", "127.0.0.1")
+    chat_url = f"http://127.0.0.1:{port}/api/Chat"
     print_startup_config()
-    access = get_access_info()
-    print(f"Starting IRI AI on http://localhost:{port}/api/Chat")
-    print("Open from this PC or any device on the same Wi-Fi:")
-    for url in access["lanUrls"]:
-        print(f"  {url}")
-    print("For internet access from any device, use start_anywhere.bat (Cloudflare tunnel).")
+    print(f"Starting IRI AI on {chat_url}")
+    print("Open that URL in your browser (localhost). Database can be connected later.")
+
+    def open_browser():
+        try:
+            webbrowser.open(chat_url)
+        except Exception:
+            pass
+
+    if os.environ.get("OPEN_BROWSER", "1").strip() not in {"0", "false", "no"}:
+        threading.Timer(1.2, open_browser).start()
+
     app.run(host=host, port=port, debug=False)

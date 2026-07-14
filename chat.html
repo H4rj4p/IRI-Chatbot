@@ -372,54 +372,53 @@
       return `${answer}\n\n${data.error}`;
     }
 
-    async function checkStatus() {
+    async function fetchJson(url, timeoutMs) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(`${base}/api/TestSqlConnection`);
-        const data = await res.json();
-        const access = (data.config && data.config.access) || {};
-        const lanUrls = access.lanUrls || [];
-        const accessTip = lanUrls.length
-          ? `\n\nOpen this chat from any device on the same Wi-Fi:\n${lanUrls.map((u) => `• ${u}`).join("\n")}\n\nFor internet access, run start_anywhere.bat on the SQL Server PC and use the Cloudflare URL.`
-          : "\n\nRun start_anywhere.bat on the SQL Server PC, then open the printed URL from any device.";
+        const res = await fetch(url, { signal: controller.signal });
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    }
 
+    async function checkStatus() {
+      // Show the app is up immediately; SQL can wait.
+      try {
+        const health = await fetchJson(`${base}/api/Health`, 3000);
+        if (health.ok) {
+          status.textContent = "App running (localhost)";
+          status.className = "ok";
+        }
+      } catch {
+        status.textContent = "App not running";
+        status.className = "bad";
+        addBot("The app isn't running. Start it with start_iri_chatbot.bat or: python app.pyw");
+        return;
+      }
+
+      try {
+        const data = await fetchJson(`${base}/api/TestSqlConnection?quick=1`, 5000);
         if (data.success) {
           status.textContent = `Connected: ${data.database}`;
           status.className = "ok";
           const welcome = document.getElementById("welcome");
           if (welcome) {
-            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`
-              + `<div class="meta">Any device: keep the app running on the SQL Server PC, then open this same page URL (or the Cloudflare URL from start_anywhere.bat).</div>`;
+            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`;
           }
         } else {
-          status.textContent = "DB not connected";
-          status.className = "bad";
-          const connection = data.config && data.config.connection
-            ? data.config.connection
-            : {};
-          const details = [
-            data.error || data.message || "Unknown connection error",
-            data.hint ? `\nFix: ${data.hint}` : "",
-            data.config && data.config.networkWarning
-              ? `\n\nNetwork: ${data.config.networkWarning}`
-              : "",
-            connection.server ? `\n\nServer: ${connection.server}` : "",
-            connection.database ? `\nDatabase: ${connection.database}` : "",
-            connection.user ? `\nUser: ${connection.user}` : "",
-            typeof connection.passwordSet === "boolean"
-              ? `\nPassword set: ${connection.passwordSet ? "yes" : "NO - still placeholder"}`
-              : "",
-            data.config && data.config.settingsPath
-              ? `\nSettings file: ${data.config.settingsPath}`
-              : "",
-            accessTip,
-            "\n\nOn the SQL Server PC run: start_anywhere.bat",
-          ].join("");
-          addBot(`The database isn't connected yet.\n\n${details}`);
+          status.textContent = "App running · DB later";
+          status.className = "ok";
+          const welcome = document.getElementById("welcome");
+          if (welcome) {
+            welcome.innerHTML = `Hi! I'm IRI AI. The chat UI is running on <strong>localhost</strong>.`
+              + `<div class="meta">Database is not connected yet — we can wire that up next. You can still see the page and type messages.</div>`;
+          }
         }
       } catch {
-        status.textContent = "App not running";
-        status.className = "bad";
-        addBot("The app isn't running. On the SQL Server PC double-click start_anywhere.bat");
+        status.textContent = "App running · DB later";
+        status.className = "ok";
       }
     }
 
