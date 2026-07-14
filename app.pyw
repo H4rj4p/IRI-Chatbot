@@ -1757,9 +1757,11 @@ def connect_database():
     WORKING_SQL_SERVER = None
     reload_local_settings()
 
-    # Full connection attempt (including alternates).
-    os.environ.pop("SqlTryAlternates", None)
-    os.environ["SqlConnectTimeout"] = os.environ.get("SqlConnectTimeoutConnect", "8")
+    # Only test the server the user entered (do not burn time on every alternate).
+    previous_alternates = os.environ.get("SqlTryAlternates")
+    previous_timeout = os.environ.get("SqlConnectTimeout")
+    os.environ["SqlTryAlternates"] = "0"
+    os.environ["SqlConnectTimeout"] = os.environ.get("SqlConnectTimeoutConnect", "6")
     try:
         with open_sql_server_connection() as connection:
             with connection.cursor() as cursor:
@@ -1769,6 +1771,7 @@ def connect_database():
                 rows = rows_as_dicts(cursor)
                 row = rows[0] if rows else {}
         summary = get_connection_summary()
+        persist_working_sql_server(summary.get("server") or server)
         return jsonify(
             {
                 "success": True,
@@ -1791,6 +1794,15 @@ def connect_database():
                 "config": get_settings_status(),
             }
         )
+    finally:
+        if previous_alternates is None:
+            os.environ.pop("SqlTryAlternates", None)
+        else:
+            os.environ["SqlTryAlternates"] = previous_alternates
+        if previous_timeout is None:
+            os.environ.pop("SqlConnectTimeout", None)
+        else:
+            os.environ["SqlConnectTimeout"] = previous_timeout
 
 
 @app.route("/api/AccessInfo", methods=["GET"])
