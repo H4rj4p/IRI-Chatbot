@@ -1,50 +1,44 @@
 # IRI AI Chatbot
 
-## Windows setup
+Python Flask chat UI for SQL Server (`Prohance`) + ChatGPT.
 
-1. Install Python 3 and select **Add Python to PATH** during installation.
-2. Install **Microsoft ODBC Driver 18 for SQL Server**.
-3. Copy `local.settings.example.json` to `local.settings.json`.
-4. Edit `local.settings.json` and replace the SQL Server, database, username,
-   password, and OpenAI API key placeholders with real values.
-5. Double-click `start_iri_chatbot_7180.bat`.
-6. Open <http://localhost:7180/api/Chat> if it does not open automatically.
-
-The launcher installs the Python packages in `requirements.txt` when they are
-missing. The page tests the SQL Server connection when it loads and shows the
-configuration location and connection error if the test fails.
-
-## SQL Server connection examples
-
-SQL authentication:
+## Run it
 
 ```text
-Driver={ODBC Driver 18 for SQL Server};Server=SERVER_NAME,1433;Database=DATABASE_NAME;User ID=USER_NAME;Password=PASSWORD;Encrypt=yes;TrustServerCertificate=yes;
+pip install -r requirements.txt
+python app.pyw
 ```
 
-Windows authentication:
+Then open **http://localhost:7179/api/Chat**
+
+The browser may open automatically. Leave the terminal open while you use the app.
+
+Status can say **App running · DB later** until SQL is connected — that is fine for now.
+
+## Useful URLs
+
+| What | URL |
+| --- | --- |
+| Chat UI | http://localhost:7179/api/Chat |
+| App health | http://localhost:7179/api/Health |
+| SQL test | http://localhost:7179/api/TestSqlConnection |
+
+## Connect to Prohance
+
+1. Run `python app.pyw` and open http://localhost:7179/api/Chat
+2. In the **Connect to Prohance** panel, enter the SQL Server address:
+   - On the SQL PC itself: click **Try 127.0.0.1**
+   - From another PC: on the SQL PC run `ipconfig`, copy the Ethernet/Wi-Fi IPv4
+     (usually `192.168.x.x`), paste it, click **Connect**
+3. Database `Prohance`, user `VMWinSQLS`, and password are already in `local.settings.json`
+
+Do **not** use `172.18.0.4` from a different PC — that Docker IP only works on the SQL host.
+
+## Settings
+
+Edit `local.settings.json` next to `app.pyw` for SQL Server and OpenAI values.
+If it is missing, run:
 
 ```text
-Driver={ODBC Driver 18 for SQL Server};Server=SERVER_NAME;Database=DATABASE_NAME;Trusted_Connection=yes;Encrypt=yes;TrustServerCertificate=yes;
+python repair_settings.py
 ```
-
-For a named SQL Server instance, use `Server=SERVER_NAME\\INSTANCE_NAME`.
-SQL Server must allow TCP connections, and its configured port must be allowed
-through the Windows firewall.
-
-## Configuration safety
-
-`local.settings.json` is intentionally excluded from Git because it contains
-passwords and API keys. Commit `local.settings.example.json` as the configuration
-template, and create a private `local.settings.json` on each computer.
-
-## Connection test
-
-With the app running, visit:
-
-```text
-http://localhost:7180/api/TestSqlConnection
-```
-
-A successful response includes `"success": true`, the connected database name,
-and the SQL Server version.

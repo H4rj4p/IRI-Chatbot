@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import socket
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -33,12 +34,25 @@ LOCAL_SETTINGS_WARNINGS = []
 app = Flask(__name__)
 
 
-def set_env_if_missing(name, value):
+SETTINGS_ENV_KEYS = (
+    "SqlConnectionString",
+    "SqlServerHost",
+    "SqlServer",
+    "SqlServerAlternates",
+    "SqlDatabase",
+    "SqlUser",
+    "SqlPassword",
+    "OpenAIApiKey",
+    "OpenAIModel",
+)
+
+
+def set_env_value(name, value, overwrite=False):
     if value is None:
         return
 
     current = os.environ.get(name)
-    if current is None or not current.strip():
+    if overwrite or current is None or not str(current).strip():
         os.environ[name] = str(value)
 
 
@@ -74,6 +88,11 @@ def collect_settings_values(settings):
         "CUSTOMCONNSTR_SqlConnectionString",
         "ConnectionStrings:SqlConnectionString",
         "SqlServerHost",
+        "SqlServer",
+        "SqlServerAlternates",
+        "SqlDatabase",
+        "SqlUser",
+        "SqlPassword",
         "OpenAIApiKey",
         "OpenAIModel",
     ):
@@ -83,8 +102,10 @@ def collect_settings_values(settings):
     return values
 
 
-def load_local_settings():
+def load_local_settings(overwrite=False):
     global LOADED_SETTINGS_PATH, LOCAL_SETTINGS_ERROR
+    LOCAL_SETTINGS_ERROR = None
+    LOCAL_SETTINGS_WARNINGS.clear()
     seen = set()
     paths = []
     for path in LOCAL_SETTINGS_CANDIDATES:
@@ -95,16 +116,22 @@ def load_local_settings():
 
     path = next((candidate for candidate in paths if candidate.exists()), None)
     if path is None:
+        LOADED_SETTINGS_PATH = None
         LOCAL_SETTINGS_WARNINGS.append(
             "local.settings.json was not found in: "
             + ", ".join(str(candidate) for candidate in paths)
+            + ". Create local.settings.json beside app.pyw, or run: python repair_settings.py"
         )
         return
 
     try:
         settings = read_settings_file(path)
     except Exception as exc:
-        LOCAL_SETTINGS_ERROR = str(exc)
+        LOADED_SETTINGS_PATH = path
+        LOCAL_SETTINGS_ERROR = (
+            f"Could not parse {path}: {exc}. "
+            "Check for missing commas/quotes after editing the password."
+        )
         return
 
     LOADED_SETTINGS_PATH = path
@@ -116,7 +143,35 @@ def load_local_settings():
         "ConnectionStrings:SqlConnectionString": "SqlConnectionString",
     }
     for name, value in values.items():
-        set_env_if_missing(aliases.get(name, name), value)
+        set_env_value(aliases.get(name, name), value, overwrite=overwrite)
+
+    # If the file only has SqlServer/SqlDatabase/SqlUser/SqlPassword, build a
+    # full SqlConnectionString so older and newer code paths both work.
+    if not str(os.environ.get("SqlConnectionString", "")).strip():
+        server = (
+            str(os.environ.get("SqlServerHost", "")).strip()
+            or str(os.environ.get("SqlServer", "")).strip()
+        )
+        database = str(os.environ.get("SqlDatabase", "")).strip()
+        user = str(os.environ.get("SqlUser", "")).strip()
+        password = str(os.environ.get("SqlPassword", "")).strip()
+        if server:
+            built = (
+                "Driver={ODBC Driver 18 for SQL Server};"
+                f"Server={server};"
+                f"Database={database};"
+                f"User ID={user};"
+                f"Password={password};"
+                "Encrypt=yes;TrustServerCertificate=yes;"
+            )
+            set_env_value("SqlConnectionString", built, overwrite=overwrite)
+
+
+def reload_local_settings():
+    """Re-read local.settings.json so password edits apply without a full restart."""
+    for key in SETTINGS_ENV_KEYS:
+        os.environ.pop(key, None)
+    load_local_settings(overwrite=True)
 
 
 load_local_settings()
@@ -135,6 +190,14 @@ def load_text_file(file_name):
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def odbc_escape(value):
+    text = str(value)
+    # Brace values that contain ODBC delimiters or common password punctuation.
+    if any(char in text for char in "{}[];,=!@"):
+        return "{" + text.replace("}", "}}") + "}"
+    return text
+
+
 def parse_connection_string(connection_string):
     values = {}
     for part in connection_string.split(";"):
@@ -145,27 +208,7 @@ def parse_connection_string(connection_string):
     return values
 
 
-def get_connection_string():
-    connection_string = (
-        os.environ.get("SqlConnectionString")
-        or os.environ.get("SQLCONNSTR_SqlConnectionString")
-        or os.environ.get("CUSTOMCONNSTR_SqlConnectionString")
-        or os.environ.get("ConnectionStrings:SqlConnectionString")
-    )
-    if not connection_string or not connection_string.strip():
-        return None
-
-    values = parse_connection_string(connection_string)
-    host_override = os.environ.get("SqlServerHost", "").strip()
-
-    if host_override:
-        values["server"] = host_override
-
-    if "driver" not in values:
-        values["driver"] = "ODBC Driver 18 for SQL Server"
-    if "trustservercertificate" not in values and "encrypt" not in values:
-        values["trustservercertificate"] = "yes"
-
+def build_odbc_connection_string(values):
     ordered_keys = [
         "driver",
         "server",
@@ -183,13 +226,100 @@ def get_connection_string():
     parts = []
     seen = set()
     for key in ordered_keys:
-        if key in values and values[key]:
-            parts.append(f"{key}={values[key]}")
+        if key in values and values[key] not in (None, ""):
+            value = values[key]
+            if key == "driver":
+                driver = str(value).strip()
+                if not driver.startswith("{"):
+                    driver = "{" + driver.strip("{}") + "}"
+                parts.append(f"Driver={driver}")
+            elif key in {"password", "pwd"}:
+                parts.append(f"{key}={odbc_escape(value)}")
+            else:
+                parts.append(f"{key}={value}")
             seen.add(key)
     for key, value in values.items():
-        if key not in seen and value:
+        if key not in seen and value not in (None, ""):
             parts.append(f"{key}={value}")
     return ";".join(parts)
+
+
+def get_connection_string():
+    explicit = (
+        os.environ.get("SqlConnectionString")
+        or os.environ.get("SQLCONNSTR_SqlConnectionString")
+        or os.environ.get("CUSTOMCONNSTR_SqlConnectionString")
+        or os.environ.get("ConnectionStrings:SqlConnectionString")
+        or ""
+    ).strip()
+
+    values = parse_connection_string(explicit) if explicit else {}
+
+    server = (
+        os.environ.get("SqlServerHost", "").strip()
+        or os.environ.get("SqlServer", "").strip()
+        or values.get("server", "")
+        or values.get("data source", "")
+    )
+    database = (
+        os.environ.get("SqlDatabase", "").strip()
+        or values.get("database", "")
+        or values.get("initial catalog", "")
+    )
+    user = (
+        os.environ.get("SqlUser", "").strip()
+        or values.get("user id", "")
+        or values.get("uid", "")
+    )
+    password = (
+        os.environ.get("SqlPassword", "").strip()
+        or values.get("password", "")
+        or values.get("pwd", "")
+    )
+
+    if server:
+        values["server"] = server
+    if database:
+        values["database"] = database
+    if user:
+        values["user id"] = user
+    if password:
+        values["password"] = password
+
+    if "driver" not in values or not values["driver"]:
+        values["driver"] = "ODBC Driver 18 for SQL Server"
+    if "encrypt" not in values:
+        values["encrypt"] = "yes"
+    if "trustservercertificate" not in values:
+        values["trustservercertificate"] = "yes"
+
+    if not values.get("server"):
+        return None
+
+    return build_odbc_connection_string(values)
+
+
+def list_odbc_drivers():
+    if pyodbc is None:
+        return []
+    try:
+        return list(pyodbc.drivers())
+    except Exception:
+        return []
+
+
+def get_connection_summary():
+    values = parse_connection_string(get_connection_string() or "")
+    password = values.get("password") or values.get("pwd") or ""
+    return {
+        "settingsPath": str(LOADED_SETTINGS_PATH or LOCAL_SETTINGS_PATH),
+        "server": values.get("server", ""),
+        "database": values.get("database", "") or values.get("initial catalog", ""),
+        "user": values.get("user id", "") or values.get("uid", ""),
+        "passwordSet": bool(password) and password not in {"YOUR_PASSWORD", "PASSWORD"},
+        "driver": values.get("driver", ""),
+        "availableOdbcDrivers": list_odbc_drivers(),
+    }
 
 
 def get_settings_status():
@@ -204,29 +334,358 @@ def get_settings_status():
     return {
         "settingsPath": str(LOADED_SETTINGS_PATH or LOCAL_SETTINGS_PATH),
         "checkedSettingsPaths": checked_paths,
-        "settingsFileExists": bool(LOADED_SETTINGS_PATH),
+        "settingsFileExists": bool(LOADED_SETTINGS_PATH and Path(LOADED_SETTINGS_PATH).exists()),
         "settingsLoadError": LOCAL_SETTINGS_ERROR,
-        "settingsWarnings": LOCAL_SETTINGS_WARNINGS,
+        "settingsWarnings": list(LOCAL_SETTINGS_WARNINGS),
         "hasSqlConnectionString": bool(get_connection_string()),
-        "hasOpenAIApiKey": bool(os.environ.get("OpenAIApiKey", "").strip()),
+        "hasOpenAIApiKey": bool(os.environ.get("OpenAIApiKey", "").strip())
+        and os.environ.get("OpenAIApiKey", "").strip() not in {"YOUR_OPENAI_API_KEY"},
+        "connection": get_connection_summary(),
+        "networkWarning": get_network_warning(),
+        "access": get_access_info(),
+        "sqlCandidates": alternate_sql_servers(
+            (get_connection_summary() or {}).get("server", "")
+        ),
     }
 
 
-def get_config_error():
-    host = os.environ.get("SqlServerHost", "").strip()
+def get_sql_config_error():
+    if LOCAL_SETTINGS_ERROR:
+        return LOCAL_SETTINGS_ERROR
+
+    host = os.environ.get("SqlServerHost", "").strip() or os.environ.get("SqlServer", "").strip()
     placeholders = {"YOUR_WINDOWS_IP", "YOUR_SERVER"}
     if host and host.upper() in placeholders:
-        return f"SqlServerHost is still '{host}'. Replace it with your SQL Server host or leave it blank to use SqlConnectionString."
+        return f"SqlServer/SqlServerHost is still '{host}'. Replace it with your SQL Server host."
 
-    values = parse_connection_string(get_connection_string() or "")
+    connection_string = get_connection_string() or ""
+    if not connection_string:
+        return (
+            "SQL Server settings are incomplete. Set SqlServer, SqlDatabase, SqlUser, and SqlPassword "
+            "in local.settings.json (or provide SqlConnectionString)."
+        )
+
+    values = parse_connection_string(connection_string)
     configured_server = values.get("server", "").split(",", 1)[0].strip()
     if configured_server.upper() in placeholders:
-        return "SqlConnectionString still contains YOUR_SERVER. Replace the placeholders in local.settings.json with your SQL Server details."
+        return "Server is still YOUR_SERVER. Set SqlServer in local.settings.json."
+
+    password = values.get("password") or values.get("pwd") or ""
+    if password in {"", "YOUR_PASSWORD", "PASSWORD"}:
+        return (
+            "Password is still a placeholder. In local.settings.json set "
+            '"SqlPassword": "your-real-password", save the file, then restart: python app.pyw'
+        )
+
+    for token in ("YOUR_DATABASE", "YOUR_USER"):
+        if token in connection_string:
+            return (
+                f"Settings still contain {token}. "
+                "Replace it in local.settings.json with your SQL Server details."
+            )
+
+    drivers = list_odbc_drivers()
+    if pyodbc is not None and drivers and not any("SQL Server" in driver for driver in drivers):
+        return (
+            "Microsoft ODBC Driver for SQL Server is not installed. "
+            "Install 'ODBC Driver 18 for SQL Server', then restart the app. "
+            f"Drivers found: {drivers}"
+        )
 
     return None
 
 
+def is_docker_style_host(host):
+    host = (host or "").split(",", 1)[0].split("\\", 1)[0].strip().lower()
+    return host.startswith(("172.16.", "172.17.", "172.18.", "172.19.", "172.2", "172.3"))
+
+
+def split_server_host_port(server):
+    text = (server or "").strip()
+    if not text:
+        return "", "1433"
+    if "," in text:
+        host, port = text.split(",", 1)
+        return host.strip(), (port.strip() or "1433")
+    return text, "1433"
+
+
+def _add_server_candidate(candidates, seen, server):
+    text = (server or "").strip()
+    if not text:
+        return
+    key = text.lower()
+    if key in seen:
+        return
+    seen.add(key)
+    candidates.append(text)
+
+
+def parse_server_list(raw):
+    """Parse 'host,port;host2,port2' or JSON list into server strings."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            data = json.loads(text)
+            if isinstance(data, list):
+                return [str(item).strip() for item in data if str(item).strip()]
+        except Exception:
+            pass
+
+    servers = []
+    # Prefer semicolon / newline separators between full Server= values.
+    chunks = []
+    for part in text.replace("\n", ";").split(";"):
+        part = part.strip()
+        if part:
+            chunks.append(part)
+
+    if len(chunks) == 1 and chunks[0].count(",") > 1:
+        # Legacy comma-only list: host,port,host,port
+        pieces = [p.strip() for p in chunks[0].split(",") if p.strip()]
+        paired = []
+        index = 0
+        while index < len(pieces):
+            host = pieces[index]
+            if index + 1 < len(pieces) and pieces[index + 1].isdigit():
+                paired.append(f"{host},{pieces[index + 1]}")
+                index += 2
+            else:
+                paired.append(host)
+                index += 1
+        return paired
+
+    return chunks
+
+
+def alternate_sql_servers(server):
+    """Build a list of SQL hosts to try so the same settings work on more machines.
+
+    Order favors addresses that work when the chatbot runs on the SQL Server PC
+    (localhost), then Docker/internal, then configured host / hostname.
+    """
+    host, port = split_server_host_port(server)
+    candidates = []
+    seen = set()
+
+    # Prefer local published SQL first when the configured host looks Docker-only.
+    if is_docker_style_host(host) or not host:
+        for alt in (f"127.0.0.1,{port}", f"localhost,{port}", f"host.docker.internal,{port}"):
+            _add_server_candidate(candidates, seen, alt)
+
+    _add_server_candidate(candidates, seen, server.strip() if server else "")
+
+    extras = os.environ.get("SqlServerAlternates", "").strip()
+    for part in parse_server_list(extras):
+        _add_server_candidate(candidates, seen, part)
+
+    # Always keep local options available even for LAN IPs (same machine runs both).
+    for alt in (f"127.0.0.1,{port}", f"localhost,{port}", f"host.docker.internal,{port}"):
+        _add_server_candidate(candidates, seen, alt)
+
+    # Windows / Docker hostname previously used as login/server name.
+    sql_user = os.environ.get("SqlUser", "").strip()
+    if sql_user and "\\" not in sql_user and "/" not in sql_user:
+        _add_server_candidate(candidates, seen, f"{sql_user},{port}")
+
+    if host and not is_docker_style_host(host):
+        _add_server_candidate(candidates, seen, f"{host},{port}")
+
+    # Last resort: original Docker IP from prior setup.
+    _add_server_candidate(candidates, seen, f"172.18.0.4,{port}")
+
+    return candidates
+
+
+WORKING_SQL_SERVER = None
+
+
+def persist_working_sql_server(server):
+    """Remember the host that connected so the next start is faster."""
+    global WORKING_SQL_SERVER
+    WORKING_SQL_SERVER = server
+    path = LOADED_SETTINGS_PATH or LOCAL_SETTINGS_PATH
+    if path is None or not Path(path).exists():
+        return
+    try:
+        settings = read_settings_file(Path(path))
+        values = settings.setdefault("Values", settings if isinstance(settings, dict) else {})
+        if not isinstance(values, dict):
+            return
+        current = str(values.get("SqlServer") or "").strip()
+        if current.lower() == server.lower():
+            os.environ["SqlServer"] = server
+            return
+        values["SqlServer"] = server
+        password = str(values.get("SqlPassword") or os.environ.get("SqlPassword") or "").strip()
+        database = str(values.get("SqlDatabase") or os.environ.get("SqlDatabase") or "").strip()
+        user = str(values.get("SqlUser") or os.environ.get("SqlUser") or "").strip()
+        values["SqlConnectionString"] = (
+            "Driver={ODBC Driver 18 for SQL Server};"
+            f"Server={server};"
+            f"Database={database};"
+            f"User ID={user};"
+            f"Password={password};"
+            "Encrypt=yes;TrustServerCertificate=yes;"
+        )
+        Path(path).write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        os.environ["SqlServer"] = server
+        os.environ["SqlConnectionString"] = values["SqlConnectionString"]
+        print(f"Saved working SqlServer={server} to {path}")
+    except Exception as exc:
+        print(f"Could not persist working SqlServer ({server}): {exc}")
+
+
+def get_network_warning():
+    values = parse_connection_string(get_connection_string() or "")
+    server_host = values.get("server", "").split(",", 1)[0].split("\\", 1)[0].strip()
+    if is_docker_style_host(server_host):
+        return (
+            f"SqlServer is {server_host}, which is often a Docker/internal IP. "
+            "Run the chatbot on the SQL Server PC with: python app.pyw. "
+            "Then open http://localhost:7179/api/Chat. "
+            "It will auto-try 127.0.0.1 and save the working address."
+        )
+    return None
+
+
+def list_lan_access_urls(port):
+    """URLs other devices on the same Wi-Fi/LAN can use to open the chat."""
+    urls = [f"http://127.0.0.1:{port}/api/Chat", f"http://localhost:{port}/api/Chat"]
+    hosts = set()
+    try:
+        hostname = socket.gethostname()
+        if hostname:
+            hosts.add(hostname)
+            try:
+                hosts.add(socket.gethostbyname(hostname))
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.settimeout(0.5)
+        probe.connect(("8.8.8.8", 80))
+        hosts.add(probe.getsockname()[0])
+        probe.close()
+    except OSError:
+        pass
+
+    for host in sorted(hosts):
+        if not host or host.startswith("127.") or host == "::1":
+            continue
+        if ":" in host:  # skip raw IPv6 for simple LAN links
+            continue
+        urls.append(f"http://{host}:{port}/api/Chat")
+    return list(dict.fromkeys(urls))
+
+
+def get_access_info():
+    port = int(os.environ.get("PORT", "7179"))
+    return {
+        "port": port,
+        "localUrl": f"http://127.0.0.1:{port}/api/Chat",
+        "lanUrls": list_lan_access_urls(port),
+        "hint": (
+            "Keep this app running on the SQL Server PC. "
+            "On your phone or another computer, open one of the lanUrls "
+            "On your phone or another computer, open one of the lanUrls "
+            "(same Wi-Fi), or keep using http://localhost:7179/api/Chat on this PC."
+        ),
+    }
+
+
+def get_openai_config_error():
+    api_key = os.environ.get("OpenAIApiKey", "").strip()
+    if api_key in {"", "YOUR_OPENAI_API_KEY"}:
+        return (
+            "OpenAIApiKey is still a placeholder. In local.settings.json set "
+            '"OpenAIApiKey": "sk-..." with your real ChatGPT/OpenAI key, then restart: python app.pyw'
+        )
+    return None
+
+
+def get_config_error():
+    return get_sql_config_error() or get_openai_config_error()
+
+
+def explain_sql_error(exc):
+    message = str(exc)
+    lower = message.lower()
+    hints = []
+    network_warning = get_network_warning()
+
+    if "im002" in lower or "data source name not found" in lower or (
+        "driver" in lower and "not found" in lower
+    ):
+        hints.append(
+            "Install Microsoft ODBC Driver 18 for SQL Server from Microsoft, then restart the app."
+        )
+        drivers = list_odbc_drivers()
+        if drivers:
+            hints.append(f"ODBC drivers currently installed: {', '.join(drivers)}")
+        else:
+            hints.append("No ODBC drivers were detected by pyodbc.")
+    if "login failed" in lower:
+        hints.append(
+            "SQL login failed. Check SqlUser and SqlPassword. "
+            "The SQL login must exist and be allowed to use database Prohance."
+        )
+    if "cannot open database" in lower:
+        hints.append("Database name may be wrong. Confirm SqlDatabase is exactly Prohance.")
+    if "handshakes before login" in lower or ("08001" in lower and "26)" in message):
+        hints.append(
+            "TCP reached the address, but SQL Server never completed the login handshake. "
+            "Run python app.pyw on the SQL Server PC (not in the cloud). "
+            "The app auto-tries 127.0.0.1 / localhost and saves the working host. "
+            "Then open http://localhost:7179/api/Chat."
+        )
+    elif any(
+        token in lower
+        for token in (
+            "could not open a connection",
+            "server is not found",
+            "network path was not found",
+            "tcp provider",
+            "named pipes provider",
+            "connection timed out",
+            "actively refused",
+            "no such host",
+            "getaddrinfo",
+            "could not translate",
+            "login timeout",
+            "hy000",
+        )
+    ):
+        hints.append(
+            "Cannot reach SQL Server from this PC. "
+            "172.18.x.x addresses are usually Docker/internal and often do not work from a normal Windows PC. "
+            "On the SQL Server machine run ipconfig, copy the Ethernet/Wi-Fi IPv4 (usually 192.168.x.x or 10.x.x.x), "
+            "put that in SqlServer like \"192.168.1.50,1433\", then restart python app.pyw. "
+            "Also on the SQL Server PC: enable TCP/IP, allow firewall TCP 1433, enable SQL authentication."
+        )
+    if "certificate" in lower or "ssl" in lower:
+        hints.append(
+            "TLS/certificate issue. Keep Encrypt=yes and TrustServerCertificate=yes."
+        )
+    if network_warning and network_warning not in " ".join(hints):
+        hints.append(network_warning)
+    if not hints:
+        hints.append(
+            "Check SqlServer, SqlDatabase, SqlUser, SqlPassword, ODBC Driver 18, "
+            "and that SQL Server allows TCP connections."
+        )
+
+    hints.append("After editing local.settings.json, stop the app (Ctrl+C) and run: python app.pyw")
+    return " ".join(hints)
+
+
 def print_startup_config():
+    reload_local_settings()
     status = get_settings_status()
     print(f"App file: {Path(__file__).resolve()}")
     print("Settings paths checked:")
@@ -238,11 +697,65 @@ def print_startup_config():
         print(f"Settings load error: {status['settingsLoadError']}")
     for warning in status["settingsWarnings"]:
         print(f"Settings warning: {warning}")
-    print(f"SqlConnectionString loaded: {status['hasSqlConnectionString']}")
+
+    print(
+        "Settings keys present: "
+        f"SqlServer={bool(os.environ.get('SqlServer', '').strip())}, "
+        f"SqlDatabase={bool(os.environ.get('SqlDatabase', '').strip())}, "
+        f"SqlUser={bool(os.environ.get('SqlUser', '').strip())}, "
+        f"SqlPassword={bool(os.environ.get('SqlPassword', '').strip())}, "
+        f"SqlConnectionString={bool(os.environ.get('SqlConnectionString', '').strip())}, "
+        f"OpenAIApiKey={bool(os.environ.get('OpenAIApiKey', '').strip())}"
+    )
+    api_key = os.environ.get("OpenAIApiKey", "").strip()
+    if not api_key:
+        print("OpenAIApiKey value: (missing)")
+    elif api_key in {"YOUR_OPENAI_API_KEY"}:
+        print("OpenAIApiKey value: YOUR_OPENAI_API_KEY  <-- still placeholder, replace with sk-...")
+    elif api_key.startswith("sk-"):
+        print(f"OpenAIApiKey value: {api_key[:8]}...{api_key[-4:]} (looks valid)")
+    else:
+        print("OpenAIApiKey value: set, but does not start with sk-")
+    print(f"SQL settings loaded: {status['hasSqlConnectionString']}")
     print(f"OpenAIApiKey loaded: {status['hasOpenAIApiKey']}")
+    connection = status.get("connection") or {}
+    print(
+        "SQL target: "
+        f"server={connection.get('server') or '(missing)'}, "
+        f"database={connection.get('database') or '(missing)'}, "
+        f"user={connection.get('user') or '(missing)'}, "
+        f"passwordSet={connection.get('passwordSet')}"
+    )
+    config_error = get_config_error()
+    if config_error:
+        print(f"Config problem: {config_error}")
+    network_warning = get_network_warning()
+    if network_warning:
+        print(f"Network warning: {network_warning}")
+    elif not status["hasSqlConnectionString"]:
+        print(
+            "Config problem: No SQL Server address found. "
+            "Put SqlServer/SqlDatabase/SqlUser/SqlPassword (or SqlConnectionString) "
+            "in local.settings.json."
+        )
+
+
+def connection_string_for_server(server):
+    values = parse_connection_string(get_connection_string() or "")
+    if not values.get("server") and not server:
+        return None
+    values["server"] = server
+    if "driver" not in values or not values["driver"]:
+        values["driver"] = "ODBC Driver 18 for SQL Server"
+    if "encrypt" not in values:
+        values["encrypt"] = "yes"
+    if "trustservercertificate" not in values:
+        values["trustservercertificate"] = "yes"
+    return build_odbc_connection_string(values)
 
 
 def open_sql_server_connection():
+    global WORKING_SQL_SERVER
     if pyodbc is None:
         raise RuntimeError(
             "pyodbc could not load. Install pyodbc and Microsoft ODBC Driver 18 for SQL Server, "
@@ -252,7 +765,81 @@ def open_sql_server_connection():
     connection_string = get_connection_string()
     if connection_string is None:
         raise RuntimeError("SqlConnectionString is not configured.")
-    return pyodbc.connect(connection_string, timeout=30, autocommit=True)
+
+    values = parse_connection_string(connection_string)
+    configured_server = values.get("server", "")
+    candidates = []
+    seen = set()
+    if WORKING_SQL_SERVER:
+        _add_server_candidate(candidates, seen, WORKING_SQL_SERVER)
+
+    try_alternates = os.environ.get("SqlTryAlternates", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+    if try_alternates:
+        for server in alternate_sql_servers(configured_server) or [configured_server]:
+            _add_server_candidate(candidates, seen, server)
+    else:
+        _add_server_candidate(candidates, seen, configured_server or "127.0.0.1,1433")
+
+    errors = []
+    connect_timeout = int(os.environ.get("SqlConnectTimeout", "8"))
+
+    for index, server in enumerate(candidates):
+        candidate_cs = connection_string_for_server(server)
+        try:
+            connection = pyodbc.connect(
+                candidate_cs, timeout=connect_timeout, autocommit=True
+            )
+            if server != configured_server:
+                print(
+                    f"Connected using SqlServer={server} "
+                    f"(configured {configured_server or '(none)'})."
+                )
+                persist_working_sql_server(server)
+            else:
+                WORKING_SQL_SERVER = server
+            return connection
+        except Exception as exc:
+            errors.append(f"{server}: {exc}")
+            message = str(exc).lower()
+            # Keep trying other hosts for network / handshake style failures.
+            if any(
+                token in message
+                for token in (
+                    "handshake",
+                    "08001",
+                    "tcp provider",
+                    "could not open a connection",
+                    "login timeout",
+                    "actively refused",
+                    "network path",
+                    "hy000",
+                    "hyt00",
+                    "server is not found",
+                    "named pipes provider",
+                    "no such host",
+                    "getaddrinfo",
+                    "could not translate",
+                )
+            ):
+                continue
+            # Auth / database errors mean we reached SQL; do not keep guessing hosts.
+            if index == 0 and (
+                "login failed" in message
+                or "cannot open database" in message
+                or "password" in message
+            ):
+                raise
+
+    raise RuntimeError(
+        "Could not connect to SQL Server with any candidate address. "
+        "Run this app on the SQL Server PC with: python app.pyw, then open "
+        "http://localhost:7179/api/Chat. Tried: "
+        + " | ".join(errors)
+    )
 
 
 def rows_as_dicts(cursor):
@@ -1032,6 +1619,21 @@ def build_compact_result_answer(question, results):
     return f"I found {row_count} matching {noun}."
 
 
+@app.route("/api/Health", methods=["GET"])
+def health():
+    """Fast liveness check so the chat UI can appear without waiting on SQL."""
+    return jsonify(
+        {
+            "success": True,
+            "ok": True,
+            "message": "IRI AI is running on localhost.",
+            "chatUrl": f"http://127.0.0.1:{int(os.environ.get('PORT', '7179'))}/api/Chat",
+            "settingsLoaded": bool(LOADED_SETTINGS_PATH),
+            "hasSqlSettings": bool(get_connection_string()),
+        }
+    )
+
+
 @app.route("/api/Chat", methods=["GET"])
 def chat():
     path = BASE_DIR / "chat.html"
@@ -1054,48 +1656,128 @@ def get_database_schema():
         return jsonify({"success": False, "error": str(exc)})
 
 
-@app.route("/api/TestSqlConnection", methods=["GET", "POST"])
-def test_sql_connection():
-    if get_connection_string() is None:
+@app.route("/api/SqlSettings", methods=["GET"])
+def sql_settings():
+    """Safe settings summary for the connect form (no password returned)."""
+    reload_local_settings()
+    summary = get_connection_summary()
+    return jsonify(
+        {
+            "success": True,
+            "server": summary.get("server", ""),
+            "database": summary.get("database", "") or "Prohance",
+            "user": summary.get("user", "") or "VMWinSQLS",
+            "passwordSet": bool(summary.get("passwordSet")),
+            "candidates": alternate_sql_servers(summary.get("server", "")),
+            "hint": (
+                "Database is Prohance. If this PC is not the SQL Server machine, "
+                "enter the SQL PC Ethernet/Wi-Fi IPv4 from ipconfig "
+                "(usually 192.168.x.x), not 172.18.0.4."
+            ),
+        }
+    )
+
+
+@app.route("/api/ConnectDatabase", methods=["POST"])
+def connect_database():
+    """Update SqlServer in local.settings.json and test the Prohance connection."""
+    reload_local_settings()
+    payload = request.get_json(silent=True) or {}
+    server = str(payload.get("server") or "").strip()
+    if not server:
         return jsonify(
             {
                 "success": False,
-                "message": "SqlConnectionString is not loaded.",
-                "error": (
-                    "Check that local.settings.json is beside app.pyw and contains "
-                    'Values.SqlConnectionString or ConnectionStrings.SqlConnectionString.'
-                ),
-                "config": get_settings_status(),
+                "message": "Enter a SQL Server address.",
+                "hint": "Example: 192.168.1.50,1433 or 127.0.0.1,1433",
             }
         )
 
-    config_error = get_config_error()
-    if config_error:
+    if "," not in server and "\\" not in server:
+        server = f"{server},1433"
+
+    database = str(
+        payload.get("database")
+        or os.environ.get("SqlDatabase")
+        or "Prohance"
+    ).strip()
+    user = str(
+        payload.get("user") or os.environ.get("SqlUser") or "VMWinSQLS"
+    ).strip()
+    password = str(
+        payload.get("password") or os.environ.get("SqlPassword") or ""
+    ).strip()
+    if not password or password in {"YOUR_PASSWORD", "PASSWORD"}:
         return jsonify(
             {
                 "success": False,
-                "message": "Database config needs to be updated.",
-                "error": config_error,
-                "config": get_settings_status(),
+                "message": "SqlPassword is not set in local.settings.json.",
+                "hint": "Set SqlPassword in local.settings.json, then try again.",
             }
         )
 
+    path = Path(LOADED_SETTINGS_PATH or LOCAL_SETTINGS_PATH)
+    try:
+        settings = read_settings_file(path) if path.exists() else {"IsEncrypted": False, "Values": {}}
+    except Exception:
+        settings = {"IsEncrypted": False, "Values": {}}
+    values = settings.setdefault("Values", {})
+    if not isinstance(values, dict):
+        values = {}
+        settings["Values"] = values
+
+    values["SqlServer"] = server
+    values["SqlDatabase"] = database
+    values["SqlUser"] = user
+    values["SqlPassword"] = password
+    values["SqlConnectionString"] = (
+        "Driver={ODBC Driver 18 for SQL Server};"
+        f"Server={server};"
+        f"Database={database};"
+        f"User ID={user};"
+        f"Password={password};"
+        "Encrypt=yes;TrustServerCertificate=yes;"
+    )
+    if "OpenAIApiKey" not in values and os.environ.get("OpenAIApiKey"):
+        values["OpenAIApiKey"] = os.environ.get("OpenAIApiKey")
+    if "OpenAIModel" not in values:
+        values["OpenAIModel"] = os.environ.get("OpenAIModel") or "gpt-4o-mini"
+
+    try:
+        path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    except Exception as exc:
+        return jsonify(
+            {
+                "success": False,
+                "message": f"Could not save local.settings.json: {exc}",
+            }
+        )
+
+    global WORKING_SQL_SERVER
+    WORKING_SQL_SERVER = None
+    reload_local_settings()
+
+    # Only test the server the user entered (do not burn time on every alternate).
+    previous_alternates = os.environ.get("SqlTryAlternates")
+    previous_timeout = os.environ.get("SqlConnectTimeout")
+    os.environ["SqlTryAlternates"] = "0"
+    os.environ["SqlConnectTimeout"] = os.environ.get("SqlConnectTimeoutConnect", "6")
     try:
         with open_sql_server_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName")
+                cursor.execute(
+                    "SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName"
+                )
                 rows = rows_as_dicts(cursor)
                 row = rows[0] if rows else {}
-
-        values = parse_connection_string(get_connection_string() or "")
+        summary = get_connection_summary()
+        persist_working_sql_server(summary.get("server") or server)
         return jsonify(
             {
                 "success": True,
-                "message": "Connected to SQL Server successfully.",
-                "server": os.environ.get("SqlServerHost", "").strip()
-                or values.get("server", "")
-                or values.get("data source", ""),
-                "database": row.get("DatabaseName", ""),
+                "message": f"Connected to {row.get('DatabaseName') or database}.",
+                "server": summary.get("server", server),
+                "database": row.get("DatabaseName", database),
                 "serverVersion": row.get("ServerVersion", ""),
                 "config": get_settings_status(),
             }
@@ -1104,16 +1786,109 @@ def test_sql_connection():
         return jsonify(
             {
                 "success": False,
-                "message": "Failed to connect to SQL Server.",
+                "message": "Saved settings, but could not connect yet.",
                 "error": str(exc),
-                "hint": "Connection refused usually means: wrong SqlServerHost/server, SQL Server not allowing TCP connections, missing ODBC Driver 18, or a firewall blocking port 1433.",
+                "hint": explain_sql_error(exc),
+                "server": server,
+                "database": database,
                 "config": get_settings_status(),
             }
         )
+    finally:
+        if previous_alternates is None:
+            os.environ.pop("SqlTryAlternates", None)
+        else:
+            os.environ["SqlTryAlternates"] = previous_alternates
+        if previous_timeout is None:
+            os.environ.pop("SqlConnectTimeout", None)
+        else:
+            os.environ["SqlConnectTimeout"] = previous_timeout
+
+
+@app.route("/api/AccessInfo", methods=["GET"])
+def access_info():
+    return jsonify({"success": True, **get_access_info()})
+
+
+@app.route("/api/TestSqlConnection", methods=["GET", "POST"])
+def test_sql_connection():
+    reload_local_settings()
+    quick = str(request.args.get("quick", "")).lower() in {"1", "true", "yes"}
+    previous_timeout = os.environ.get("SqlConnectTimeout")
+    if quick:
+        os.environ["SqlConnectTimeout"] = os.environ.get("SqlConnectTimeoutQuick", "2")
+        os.environ["SqlTryAlternates"] = "0"
+
+    try:
+        if get_connection_string() is None:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "SQL Server settings are not loaded.",
+                    "error": (
+                        "Check that local.settings.json is beside app.pyw and contains "
+                        "SqlServer / SqlDatabase / SqlUser / SqlPassword "
+                        "(or a full SqlConnectionString)."
+                    ),
+                    "hint": "Create local.settings.json beside app.pyw, or run: python repair_settings.py",
+                    "config": get_settings_status(),
+                }
+            )
+
+        config_error = get_sql_config_error()
+        if config_error:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Database config needs to be updated.",
+                    "error": config_error,
+                    "hint": "Edit local.settings.json, save it, then restart: python app.pyw",
+                    "config": get_settings_status(),
+                }
+            )
+
+        try:
+            with open_sql_server_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName"
+                    )
+                    rows = rows_as_dicts(cursor)
+                    row = rows[0] if rows else {}
+
+            summary = get_connection_summary()
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "Connected to SQL Server successfully.",
+                    "server": summary.get("server", ""),
+                    "database": row.get("DatabaseName", ""),
+                    "serverVersion": row.get("ServerVersion", ""),
+                    "config": get_settings_status(),
+                }
+            )
+        except Exception as exc:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Failed to connect to SQL Server.",
+                    "error": str(exc),
+                    "hint": explain_sql_error(exc),
+                    "config": get_settings_status(),
+                }
+            )
+    finally:
+        if quick:
+            if previous_timeout is None:
+                os.environ.pop("SqlConnectTimeout", None)
+            else:
+                os.environ["SqlConnectTimeout"] = previous_timeout
+            os.environ.pop("SqlTryAlternates", None)
 
 
 @app.route("/api/AskQuestion", methods=["POST"])
 def ask_question():
+    reload_local_settings()
     payload = request.get_json(silent=True) or {}
     question, history, confirmed_label, confirmed_id = parse_chat_request(payload)
     last_result = parse_last_result(payload)
@@ -1129,7 +1904,27 @@ def ask_question():
     if get_connection_string() is None:
         return jsonify(
             {
-                "error": "SqlConnectionString is not configured.",
+                "error": "SQL Server settings are not configured.",
+                "config": get_settings_status(),
+            }
+        )
+
+    config_error = get_sql_config_error()
+    if config_error:
+        return jsonify(
+            {
+                "answer": "Database config needs to be updated before I can answer.",
+                "error": config_error,
+                "config": get_settings_status(),
+            }
+        )
+
+    openai_error = get_openai_config_error()
+    if openai_error:
+        return jsonify(
+            {
+                "answer": "ChatGPT is not set up yet.",
+                "error": openai_error,
                 "config": get_settings_status(),
             }
         )
@@ -1238,8 +2033,23 @@ def ask_question():
 
 
 if __name__ == "__main__":
+    import threading
+    import webbrowser
+
     port = int(os.environ.get("PORT", "7179"))
-    host = os.environ.get("HOST", "0.0.0.0")
+    host = os.environ.get("HOST", "127.0.0.1")
+    chat_url = f"http://127.0.0.1:{port}/api/Chat"
     print_startup_config()
-    print(f"Starting IRI AI on http://localhost:{port}/api/Chat")
+    print(f"Starting IRI AI on {chat_url}")
+    print("Open that URL in your browser (localhost). Database can be connected later.")
+
+    def open_browser():
+        try:
+            webbrowser.open(chat_url)
+        except Exception:
+            pass
+
+    if os.environ.get("OPEN_BROWSER", "1").strip() not in {"0", "false", "no"}:
+        threading.Timer(1.2, open_browser).start()
+
     app.run(host=host, port=port, debug=False)

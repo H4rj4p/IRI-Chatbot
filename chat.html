@@ -32,6 +32,60 @@
     }
     #status.ok { background: #dcfce7; color: #166534; }
     #status.bad { background: #fee2e2; color: #991b1b; }
+    #connect-panel {
+      display: none;
+      margin: 0 20px 12px;
+      padding: 14px 16px;
+      background: #fff;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+    }
+    #connect-panel.visible { display: block; }
+    #connect-panel h2 {
+      font-size: 0.95rem;
+      margin-bottom: 6px;
+    }
+    #connect-panel p {
+      font-size: 0.82rem;
+      color: #4b5563;
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+    #connect-panel .row-form {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    #connect-panel input {
+      flex: 1;
+      min-width: 180px;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    #connect-panel button {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 8px;
+      background: #111827;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #connect-panel button.secondary {
+      background: #e5e7eb;
+      color: #111827;
+    }
+    #connect-panel .connect-msg {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #374151;
+      white-space: pre-wrap;
+    }
+    #connect-panel .connect-msg.err { color: #991b1b; }
+    #connect-panel .connect-msg.ok { color: #166534; }
     #messages {
       flex: 1;
       overflow-y: auto;
@@ -299,6 +353,23 @@
     <span id="status">Checking database...</span>
   </header>
 
+  <div id="connect-panel">
+    <h2>Connect to Prohance</h2>
+    <p>
+      On the <strong>SQL Server PC</strong>, run <code>ipconfig</code> and paste the
+      Ethernet/Wi-Fi IPv4 below (usually <code>192.168.x.x</code>).
+      If this app is running on that same PC, use <code>127.0.0.1</code>.
+      Database <strong>Prohance</strong>, user <strong>VMWinSQLS</strong>, and password are already in settings.
+    </p>
+    <div class="row-form">
+      <input id="sql-server-input" type="text" placeholder="192.168.1.50,1433" />
+      <button id="connect-btn" type="button">Connect</button>
+      <button id="try-localhost-btn" class="secondary" type="button">Try 127.0.0.1</button>
+      <button id="try-docker-btn" class="secondary" type="button">Try 172.18.0.4</button>
+    </div>
+    <div id="connect-msg" class="connect-msg"></div>
+  </div>
+
   <div id="messages">
     <div class="row bot">
       <div class="avatar">AI</div>
@@ -372,31 +443,139 @@
       return `${answer}\n\n${data.error}`;
     }
 
-    async function checkStatus() {
+    async function fetchJson(url, timeoutMs) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(`${base}/api/TestSqlConnection`);
-        const data = await res.json();
-        if (data.success) {
-          status.textContent = `Connected: ${data.database}`;
+        const res = await fetch(url, { signal: controller.signal });
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function checkStatus() {
+      const panel = document.getElementById("connect-panel");
+      const serverInput = document.getElementById("sql-server-input");
+
+      try {
+        const health = await fetchJson(`${base}/api/Health`, 3000);
+        if (health.ok) {
+          status.textContent = "App running (localhost)";
           status.className = "ok";
-          const welcome = document.getElementById("welcome");
-          if (welcome) {
-            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`;
-          }
-        } else {
-          status.textContent = "DB not connected";
-          status.className = "bad";
-          const config = data.config
-            ? `\n\nConfig checked:\n${JSON.stringify(data.config, null, 2)}`
-            : "";
-          addBot(`The database isn't connected yet.\n\n${data.error || data.message}${config}`);
         }
       } catch {
         status.textContent = "App not running";
         status.className = "bad";
         addBot("The app isn't running. Start it with: python app.pyw");
+        return;
+      }
+
+      try {
+        const settings = await fetchJson(`${base}/api/SqlSettings`, 3000);
+        if (serverInput && settings.server) {
+          serverInput.value = settings.server;
+        }
+      } catch {
+        /* ignore */
+      }
+
+      try {
+        const data = await fetchJson(`${base}/api/TestSqlConnection?quick=1`, 5000);
+        if (data.success) {
+          status.textContent = `Connected: ${data.database}`;
+          status.className = "ok";
+          if (panel) panel.classList.remove("visible");
+          const welcome = document.getElementById("welcome");
+          if (welcome) {
+            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`;
+          }
+        } else {
+          status.textContent = "Not connected to Prohance";
+          status.className = "bad";
+          if (panel) panel.classList.add("visible");
+          const welcome = document.getElementById("welcome");
+          if (welcome) {
+            welcome.innerHTML = `Hi! I'm IRI AI. Enter the SQL Server address above to connect to <strong>Prohance</strong>.`
+              + `<div class="meta">Use the SQL PC LAN IP from ipconfig, or 127.0.0.1 if this is the SQL PC.</div>`;
+          }
+        }
+      } catch {
+        status.textContent = "Not connected to Prohance";
+        status.className = "bad";
+        if (panel) panel.classList.add("visible");
       }
     }
+
+    async function connectToProhance(serverOverride) {
+      const serverInput = document.getElementById("sql-server-input");
+      const msg = document.getElementById("connect-msg");
+      const btn = document.getElementById("connect-btn");
+      const server = (serverOverride || (serverInput && serverInput.value) || "").trim();
+      if (!server) {
+        if (msg) {
+          msg.className = "connect-msg err";
+          msg.textContent = "Enter a server address first (example: 192.168.1.50,1433).";
+        }
+        return;
+      }
+      if (serverInput) serverInput.value = server;
+      if (msg) {
+        msg.className = "connect-msg";
+        msg.textContent = `Connecting to Prohance at ${server}...`;
+      }
+      if (btn) btn.disabled = true;
+      status.textContent = "Connecting...";
+      status.className = "";
+      try {
+        const res = await fetch(`${base}/api/ConnectDatabase`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ server, database: "Prohance" }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          status.textContent = `Connected: ${data.database}`;
+          status.className = "ok";
+          document.getElementById("connect-panel").classList.remove("visible");
+          if (msg) {
+            msg.className = "connect-msg ok";
+            msg.textContent = data.message || "Connected.";
+          }
+          const welcome = document.getElementById("welcome");
+          if (welcome) {
+            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`;
+          }
+          addBot(`Connected to ${data.database} on ${data.server || server}.`);
+        } else {
+          status.textContent = "Not connected to Prohance";
+          status.className = "bad";
+          if (msg) {
+            msg.className = "connect-msg err";
+            msg.textContent = [data.message, data.error, data.hint].filter(Boolean).join("\n\n");
+          }
+        }
+      } catch (err) {
+        status.textContent = "Not connected to Prohance";
+        status.className = "bad";
+        if (msg) {
+          msg.className = "connect-msg err";
+          msg.textContent = String(err);
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    document.getElementById("connect-btn").addEventListener("click", () => connectToProhance());
+    document.getElementById("try-localhost-btn").addEventListener("click", () => connectToProhance("127.0.0.1,1433"));
+    document.getElementById("try-docker-btn").addEventListener("click", () => connectToProhance("172.18.0.4,1433"));
+    document.getElementById("sql-server-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        connectToProhance();
+      }
+    });
 
     function addRow(role, text, meta) {
       const row = document.createElement("div");

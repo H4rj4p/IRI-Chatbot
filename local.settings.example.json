@@ -1,9 +1,0 @@
-{
-  "IsEncrypted": false,
-  "Values": {
-    "SqlServerHost": "",
-    "SqlConnectionString": "Driver={ODBC Driver 18 for SQL Server};Server=localhost,1433;Database=YOUR_DATABASE;User ID=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=yes;",
-    "OpenAIApiKey": "YOUR_OPENAI_API_KEY",
-    "OpenAIModel": "gpt-4o-mini"
-  }
-}
