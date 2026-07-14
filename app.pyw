@@ -198,7 +198,8 @@ def load_text_file(file_name):
 
 def odbc_escape(value):
     text = str(value)
-    if any(char in text for char in "{}[];,=!"):
+    # Brace values that contain ODBC delimiters or common password punctuation.
+    if any(char in text for char in "{}[];,=!@"):
         return "{" + text.replace("}", "}}") + "}"
     return text
 
@@ -396,13 +397,42 @@ def get_sql_config_error():
     return None
 
 
+def is_docker_style_host(host):
+    host = (host or "").split(",", 1)[0].split("\\", 1)[0].strip().lower()
+    return host.startswith(("172.16.", "172.17.", "172.18.", "172.19.", "172.2", "172.3"))
+
+
+def split_server_host_port(server):
+    text = (server or "").strip()
+    if not text:
+        return "", "1433"
+    if "," in text:
+        host, port = text.split(",", 1)
+        return host.strip(), (port.strip() or "1433")
+    return text, "1433"
+
+
+def alternate_sql_servers(server):
+    """When SqlServer is a Docker IP, also try localhost on the same port."""
+    host, port = split_server_host_port(server)
+    candidates = []
+    if server:
+        candidates.append(server.strip())
+    if is_docker_style_host(host):
+        for alt in (f"127.0.0.1,{port}", f"localhost,{port}"):
+            if alt not in candidates:
+                candidates.append(alt)
+    return candidates
+
+
 def get_network_warning():
     values = parse_connection_string(get_connection_string() or "")
     server_host = values.get("server", "").split(",", 1)[0].split("\\", 1)[0].strip()
-    if server_host.startswith(("172.16.", "172.17.", "172.18.", "172.19.", "172.2", "172.3")):
+    if is_docker_style_host(server_host):
         return (
-            f"SqlServer is {server_host}, which is often a Docker/internal IP that your PC cannot reach. "
-            "On the SQL Server PC run ipconfig and use the Ethernet/Wi-Fi IPv4 "
+            f"SqlServer is {server_host}, which is often a Docker/internal IP. "
+            "If this chatbot runs on the SQL Server PC itself, try SqlServer=\"127.0.0.1,1433\". "
+            "From another PC, use the SQL machine Ethernet/Wi-Fi IPv4 from ipconfig "
             "(usually 192.168.x.x or 10.x.x.x), e.g. \"192.168.1.50,1433\"."
         )
     return None
@@ -449,11 +479,11 @@ def explain_sql_error(exc):
     if "handshakes before login" in lower or ("08001" in lower and "26)" in message):
         hints.append(
             "TCP reached the address, but SQL Server never completed the login handshake. "
-            "That usually means 172.18.x.x is a Docker/internal IP (or a blackhole), not a "
-            "reachable SQL Server from this machine. "
-            "Run this chatbot on a Windows PC that can reach the SQL Server VM, and set "
-            "SqlServer to the SQL PC Ethernet/Wi-Fi IPv4 from ipconfig "
-            "(usually 192.168.x.x or 10.x.x.x), e.g. \"192.168.1.50,1433\"."
+            "That usually means 172.18.x.x is a Docker/internal IP, not reachable from here. "
+            "Fix: run the chatbot on the SQL Server PC and set SqlServer to \"127.0.0.1,1433\" "
+            "(or the Docker-published host port). From another PC, use the SQL machine "
+            "Ethernet/Wi-Fi IPv4 from ipconfig (usually 192.168.x.x or 10.x.x.x). "
+            "Then run: python diagnose_sql.py"
         )
     elif any(
         token in lower
@@ -551,6 +581,20 @@ def print_startup_config():
         )
 
 
+def connection_string_for_server(server):
+    values = parse_connection_string(get_connection_string() or "")
+    if not values.get("server") and not server:
+        return None
+    values["server"] = server
+    if "driver" not in values or not values["driver"]:
+        values["driver"] = "ODBC Driver 18 for SQL Server"
+    if "encrypt" not in values:
+        values["encrypt"] = "yes"
+    if "trustservercertificate" not in values:
+        values["trustservercertificate"] = "yes"
+    return build_odbc_connection_string(values)
+
+
 def open_sql_server_connection():
     if pyodbc is None:
         raise RuntimeError(
@@ -561,7 +605,48 @@ def open_sql_server_connection():
     connection_string = get_connection_string()
     if connection_string is None:
         raise RuntimeError("SqlConnectionString is not configured.")
-    return pyodbc.connect(connection_string, timeout=30, autocommit=True)
+
+    values = parse_connection_string(connection_string)
+    configured_server = values.get("server", "")
+    candidates = alternate_sql_servers(configured_server) or [configured_server]
+    errors = []
+
+    for index, server in enumerate(candidates):
+        candidate_cs = connection_string_for_server(server)
+        try:
+            connection = pyodbc.connect(candidate_cs, timeout=30, autocommit=True)
+            if index > 0:
+                print(
+                    f"Connected using fallback SqlServer={server} "
+                    f"(configured {configured_server} failed). "
+                    f"Update local.settings.json SqlServer to \"{server}\" permanently."
+                )
+            return connection
+        except Exception as exc:
+            errors.append(f"{server}: {exc}")
+            # Only fall back for Docker-style hosts after network/handshake failures.
+            message = str(exc).lower()
+            if index == 0 and not is_docker_style_host(configured_server):
+                raise
+            if index == 0 and not any(
+                token in message
+                for token in (
+                    "handshake",
+                    "08001",
+                    "tcp provider",
+                    "could not open a connection",
+                    "login timeout",
+                    "actively refused",
+                    "network path",
+                    "hy000",
+                )
+            ):
+                raise
+
+    raise RuntimeError(
+        "Could not connect to SQL Server with any candidate address. "
+        + " | ".join(errors)
+    )
 
 
 def rows_as_dicts(cursor):

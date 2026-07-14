@@ -46,10 +46,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo IMPORTANT: This chatbot must run on a PC that can reach SQL Server.
-echo 172.18.0.4 is usually Docker/internal and often fails from another machine.
-echo On the SQL Server PC, run ipconfig and put the Ethernet/Wi-Fi IPv4 into
-echo local.settings.json as SqlServer, e.g. 192.168.1.50,1433
+echo IMPORTANT: Run this on a PC that can reach SQL Server.
+echo If SqlServer is 172.18.0.4 and login handshake fails, set SqlServer to
+echo 127.0.0.1,1433 on the SQL Server PC, or the LAN IPv4 from ipconfig.
+echo Optional check: python diagnose_sql.py
 echo.
 echo Starting IRI AI at http://localhost:%PORT%/api/Chat
 echo SQL test: http://localhost:%PORT%/api/TestSqlConnection

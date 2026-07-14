@@ -18,8 +18,8 @@ SQL_SERVER = "172.18.0.4,1433"
 SQL_DATABASE = "Prohance"
 SQL_USER = "VMWinSQLS"
 SQL_PASSWORD = "Aks@2026"
-APP_URL = "https://raw.githubusercontent.com/H4rj4p/IRI-Chatbot/cursor/chatbot-1828/app.pyw"
-CHAT_URL = "https://raw.githubusercontent.com/H4rj4p/IRI-Chatbot/cursor/chatbot-1828/chat.html"
+APP_URL = "https://raw.githubusercontent.com/H4rj4p/IRI-Chatbot/cursor/sql-server-connection-eb61/app.pyw"
+CHAT_URL = "https://raw.githubusercontent.com/H4rj4p/IRI-Chatbot/cursor/sql-server-connection-eb61/chat.html"
 
 
 def load_settings() -> dict:

@@ -16,10 +16,12 @@ echo   Database: Prohance
 echo   User:     VMWinSQLS
 echo   Password: configured
 echo.
-echo If 172.18.0.4 is unreachable from your PC, on the SQL Server machine
-echo run ipconfig and put the Ethernet/Wi-Fi IPv4 into SqlServer instead.
+echo If 172.18.0.4 fails from this PC:
+echo   - On the SQL Server PC, set SqlServer to 127.0.0.1,1433
+echo   - From another PC, use the Ethernet/Wi-Fi IPv4 from ipconfig
 echo.
-echo Then run: python app.pyw
+echo Then run: python diagnose_sql.py
+echo After that: python app.pyw
 echo Test:     http://localhost:7179/api/TestSqlConnection
 echo Chat:     http://localhost:7179/api/Chat
 echo.

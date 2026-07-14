@@ -46,9 +46,10 @@ if errorlevel 1 (
 
 echo Starting IRI AI at http://localhost:%PORT%/api/Chat
 echo Or run manually with: python app.pyw
+echo Optional check first: python diagnose_sql.py
 echo.
-echo If SQL fails with handshake / 172.18.x.x: on the SQL Server PC run ipconfig,
-echo use the Ethernet/Wi-Fi IPv4 in SqlServer (usually 192.168.x.x), then restart.
+echo If SQL fails with handshake / 172.18.x.x: set SqlServer to 127.0.0.1,1433
+echo on the SQL Server PC (or the Ethernet/Wi-Fi IPv4 from ipconfig), then restart.
 echo.
 start "" "http://localhost:%PORT%/api/Chat"
 set PORT=%PORT%
