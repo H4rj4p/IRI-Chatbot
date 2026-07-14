@@ -120,7 +120,7 @@ def load_local_settings(overwrite=False):
         LOCAL_SETTINGS_WARNINGS.append(
             "local.settings.json was not found in: "
             + ", ".join(str(candidate) for candidate in paths)
-            + ". Run repair_settings.bat or create local.settings.json beside app.pyw."
+            + ". Create local.settings.json beside app.pyw, or run: python repair_settings.py"
         )
         return
 
@@ -544,9 +544,9 @@ def get_network_warning():
     if is_docker_style_host(server_host):
         return (
             f"SqlServer is {server_host}, which is often a Docker/internal IP. "
-            "Run the chatbot on the SQL Server PC (start_anywhere.bat). "
-            "It will auto-try 127.0.0.1 and save the working address. "
-            "Then open the printed LAN or tunnel URL from any phone/PC."
+            "Run the chatbot on the SQL Server PC with: python app.pyw. "
+            "Then open http://localhost:7179/api/Chat. "
+            "It will auto-try 127.0.0.1 and save the working address."
         )
     return None
 
@@ -593,7 +593,8 @@ def get_access_info():
         "hint": (
             "Keep this app running on the SQL Server PC. "
             "On your phone or another computer, open one of the lanUrls "
-            "(same Wi-Fi) or use start_anywhere.bat for an internet tunnel URL."
+            "On your phone or another computer, open one of the lanUrls "
+            "(same Wi-Fi), or keep using http://localhost:7179/api/Chat on this PC."
         ),
     }
 
@@ -639,9 +640,9 @@ def explain_sql_error(exc):
     if "handshakes before login" in lower or ("08001" in lower and "26)" in message):
         hints.append(
             "TCP reached the address, but SQL Server never completed the login handshake. "
-            "Run start_anywhere.bat on the SQL Server PC (not in the cloud). "
+            "Run python app.pyw on the SQL Server PC (not in the cloud). "
             "The app auto-tries 127.0.0.1 / localhost and saves the working host. "
-            "Then open the printed LAN or Cloudflare URL from any device."
+            "Then open http://localhost:7179/api/Chat."
         )
     elif any(
         token in lower
@@ -835,8 +836,8 @@ def open_sql_server_connection():
 
     raise RuntimeError(
         "Could not connect to SQL Server with any candidate address. "
-        "Run this app on the SQL Server PC with start_anywhere.bat, then open the "
-        "printed URL from any device. Tried: "
+        "Run this app on the SQL Server PC with: python app.pyw, then open "
+        "http://localhost:7179/api/Chat. Tried: "
         + " | ".join(errors)
     )
 
@@ -1680,7 +1681,7 @@ def test_sql_connection():
                         "SqlServer / SqlDatabase / SqlUser / SqlPassword "
                         "(or a full SqlConnectionString)."
                     ),
-                    "hint": "Create or repair local.settings.json beside app.pyw (run repair_settings.bat).",
+                    "hint": "Create local.settings.json beside app.pyw, or run: python repair_settings.py",
                     "config": get_settings_status(),
                 }
             )

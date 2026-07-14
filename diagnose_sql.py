@@ -19,7 +19,7 @@ SETTINGS_PATH = BASE_DIR / "local.settings.json"
 
 def load_settings() -> dict:
     if not SETTINGS_PATH.exists():
-        print("No local.settings.json found. Run repair_settings.bat / setup_local_settings.bat.")
+        print("No local.settings.json found. Run: python repair_settings.py")
         return {}
     for encoding in ("utf-8-sig", "utf-16", "utf-8"):
         try:
@@ -117,7 +117,7 @@ def main() -> int:
 
     if not server or not database or not user or not password:
         print("FAIL: Fill SqlServer, SqlDatabase, SqlUser, SqlPassword in local.settings.json")
-        print("Tip: run repair_settings.bat or setup_local_settings.bat")
+        print("Tip: run python repair_settings.py")
         return 1
 
     host, port = split_host_port(server)
