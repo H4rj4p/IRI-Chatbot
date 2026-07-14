@@ -4,8 +4,8 @@ Python Flask app (`app.pyw`) that talks to SQL Server (`Prohance`) and ChatGPT.
 
 ## Where to run it
 
-SQL Server is currently configured as `172.18.0.4,1433`. That address only works
-inside the SQL Server Docker/host network.
+SQL Server is configured in `local.settings.json` as `172.18.0.4,1433`. That address
+only works inside the SQL Server Docker/host network.
 
 - **Best:** run the chatbot on the **same Windows PC / Docker host** as SQL Server,
   and set `SqlServer` to `127.0.0.1,1433`.
@@ -18,22 +18,15 @@ inside the SQL Server Docker/host network.
 
 1. Install Python 3 and select **Add Python to PATH**.
 2. Install **Microsoft ODBC Driver 18 for SQL Server**.
-3. Create settings:
-
-```text
-copy local.settings.example.json local.settings.json
-```
-
-Or double-click `setup_local_settings.bat` / `repair_settings.bat`.
-
-Configured defaults:
+3. Use the checked-in `local.settings.json` (already filled with SQL + OpenAI values).
+   If it is missing or broken, run `setup_local_settings.bat` / `repair_settings.bat`.
 
 | Setting | Value |
 | --- | --- |
 | Server | `172.18.0.4,1433` (prefer `127.0.0.1,1433` on the SQL PC) |
 | Database | `Prohance` |
 | User | `VMWinSQLS` |
-| Password | set in `local.settings.json` |
+| Password | in `local.settings.json` |
 
 4. Install packages once:
 
@@ -47,7 +40,7 @@ pip install -r requirements.txt
 python diagnose_sql.py
 ```
 
-6. Start the app (either works):
+6. Start the app:
 
 ```text
 python app.pyw
@@ -56,7 +49,7 @@ python app.pyw
 or double-click `start_iri_chatbot.bat` (port **7179**) /
 `start_iri_chatbot_7180.bat` (port **7180**).
 
-7. Open the chat page and connection test:
+7. Open:
 
 - Chat: <http://localhost:7179/api/Chat>
 - Test: <http://localhost:7179/api/TestSqlConnection>
@@ -76,14 +69,3 @@ automatically. When a fallback works, update `SqlServer` permanently to that val
 - **Could not open a connection / TCP Provider** — enable TCP/IP, open firewall TCP 1433,
   allow SQL authentication (mixed mode).
 - **ODBC driver not found** — install ODBC Driver 18 for SQL Server.
-
-## Configuration safety
-
-`local.settings.json` is gitignored because it contains passwords and API keys.
-Commit only `local.settings.example.json` as the template. Keep secrets private.
-
-## SQL authentication connection string
-
-```text
-Driver={ODBC Driver 18 for SQL Server};Server=127.0.0.1,1433;Database=Prohance;User ID=VMWinSQLS;Password=YOUR_PASSWORD;Encrypt=yes;TrustServerCertificate=yes;
-```

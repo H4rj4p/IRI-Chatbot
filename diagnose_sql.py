@@ -15,20 +15,18 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = BASE_DIR / "local.settings.json"
-EXAMPLE_PATH = BASE_DIR / "local.settings.example.json"
 
 
 def load_settings() -> dict:
-    for path in (SETTINGS_PATH, EXAMPLE_PATH):
-        if not path.exists():
-            continue
-        for encoding in ("utf-8-sig", "utf-16", "utf-8"):
-            try:
-                return json.loads(path.read_text(encoding=encoding))
-            except Exception as exc:
-                print(f"Could not parse {path.name}: {exc}")
-                return {}
-    print("No local.settings.json or local.settings.example.json found.")
+    if not SETTINGS_PATH.exists():
+        print("No local.settings.json found. Run repair_settings.bat / setup_local_settings.bat.")
+        return {}
+    for encoding in ("utf-8-sig", "utf-16", "utf-8"):
+        try:
+            return json.loads(SETTINGS_PATH.read_text(encoding=encoding))
+        except Exception as exc:
+            print(f"Could not parse {SETTINGS_PATH.name}: {exc}")
+            return {}
     return {}
 
 
@@ -119,7 +117,7 @@ def main() -> int:
 
     if not server or not database or not user or not password:
         print("FAIL: Fill SqlServer, SqlDatabase, SqlUser, SqlPassword in local.settings.json")
-        print("Tip: copy local.settings.example.json or run setup_local_settings.bat")
+        print("Tip: run repair_settings.bat or setup_local_settings.bat")
         return 1
 
     host, port = split_host_port(server)

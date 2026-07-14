@@ -260,6 +260,3 @@ paket-files/
 # Python Tools for Visual Studio (PTVS)
 __pycache__/
 *.pyc
-
-# Local secrets (SQL password, OpenAI API key)
-local.settings.json

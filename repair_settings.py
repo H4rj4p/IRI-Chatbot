@@ -1,4 +1,4 @@
-"""Repair local.settings.json and refresh app.pyw from the chatbot branch."""
+"""Repair local.settings.json with the Prohance SQL + OpenAI settings."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = BASE_DIR / "local.settings.json"
-EXAMPLE_PATH = BASE_DIR / "local.settings.example.json"
 
 OPENAI_KEY = (
     "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"
@@ -23,12 +22,10 @@ CHAT_URL = "https://raw.githubusercontent.com/H4rj4p/IRI-Chatbot/cursor/sql-serv
 
 
 def load_settings() -> dict:
-    for path in (SETTINGS_PATH, EXAMPLE_PATH):
-        if not path.exists():
-            continue
+    if SETTINGS_PATH.exists():
         for encoding in ("utf-8-sig", "utf-16", "utf-8"):
             try:
-                return json.loads(path.read_text(encoding=encoding))
+                return json.loads(SETTINGS_PATH.read_text(encoding=encoding))
             except Exception:
                 continue
     return {"IsEncrypted": False, "Values": {}}
@@ -90,6 +87,7 @@ def main() -> None:
         print("Settings were still updated. Continue with your current app.pyw.")
     print()
     print("Done. Now run:")
+    print("  python diagnose_sql.py")
     print("  python app.pyw")
     print("Then open:")
     print("  http://localhost:7179/api/TestSqlConnection")

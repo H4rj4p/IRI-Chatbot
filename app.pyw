@@ -113,22 +113,13 @@ def load_local_settings(overwrite=False):
 
     path = next((candidate for candidate in paths if candidate.exists()), None)
     if path is None:
-        example = BASE_DIR / "local.settings.example.json"
-        target = LOCAL_SETTINGS_PATH
-        if example.exists():
-            target.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
-            path = target.resolve()
-            LOCAL_SETTINGS_WARNINGS.append(
-                f"Created {target.name} from local.settings.example.json "
-                "with the bundled SQL Server and OpenAI settings."
-            )
-        else:
-            LOADED_SETTINGS_PATH = None
-            LOCAL_SETTINGS_WARNINGS.append(
-                "local.settings.json was not found in: "
-                + ", ".join(str(candidate) for candidate in paths)
-            )
-            return
+        LOADED_SETTINGS_PATH = None
+        LOCAL_SETTINGS_WARNINGS.append(
+            "local.settings.json was not found in: "
+            + ", ".join(str(candidate) for candidate in paths)
+            + ". Run repair_settings.bat or create local.settings.json beside app.pyw."
+        )
+        return
 
     try:
         settings = read_settings_file(path)
@@ -1462,7 +1453,7 @@ def test_sql_connection():
                     "SqlServer / SqlDatabase / SqlUser / SqlPassword "
                     "(or a full SqlConnectionString)."
                 ),
-                "hint": "Copy local.settings.example.json to local.settings.json if needed.",
+                "hint": "Create or repair local.settings.json beside app.pyw (run repair_settings.bat).",
                 "config": get_settings_status(),
             }
         )

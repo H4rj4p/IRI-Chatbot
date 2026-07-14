@@ -24,11 +24,10 @@ goto :ready
 
 :ready
 if not exist "local.settings.json" (
-  if exist "local.settings.example.json" (
-    echo Creating local.settings.json from local.settings.example.json...
-    copy /Y "local.settings.example.json" "local.settings.json" >nul
-  ) else (
-    echo local.settings.json is missing.
+  echo local.settings.json is missing. Running repair_settings.py...
+  %RUN_PYTHON% repair_settings.py
+  if not exist "local.settings.json" (
+    echo Could not create local.settings.json.
     pause
     exit /b 1
   )
