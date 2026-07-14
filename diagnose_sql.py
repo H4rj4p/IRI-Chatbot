@@ -122,14 +122,43 @@ def main() -> int:
 
     host, port = split_host_port(server)
     candidates = [server]
+    # Always try local + Docker-published options so the same settings work
+    # when this script runs on the SQL Server PC.
+    for alt in (
+        f"127.0.0.1,{port}",
+        f"localhost,{port}",
+        f"host.docker.internal,{port}",
+        f"172.18.0.4,{port}",
+        f"VMWinSQLS,{port}",
+    ):
+        if alt not in candidates:
+            candidates.append(alt)
+    extras = str(values.get("SqlServerAlternates") or "").strip()
+    if extras:
+        # Support "host,port;host2,port2" and legacy comma-paired lists.
+        chunks = [c.strip() for c in extras.replace("\n", ";").split(";") if c.strip()]
+        if len(chunks) == 1 and chunks[0].count(",") > 1:
+            pieces = [p.strip() for p in chunks[0].split(",") if p.strip()]
+            index = 0
+            while index < len(pieces):
+                host_part = pieces[index]
+                if index + 1 < len(pieces) and pieces[index + 1].isdigit():
+                    part = f"{host_part},{pieces[index + 1]}"
+                    index += 2
+                else:
+                    part = host_part
+                    index += 1
+                if part and part not in candidates:
+                    candidates.append(part)
+        else:
+            for part in chunks:
+                if part and part not in candidates:
+                    candidates.append(part)
     if is_docker_ip(host):
         print(
             f"NOTE: {host} looks like a Docker/internal IP. "
-            "If the chatbot runs on the SQL Server PC, also try 127.0.0.1."
+            "On the SQL Server PC, 127.0.0.1 is tried automatically."
         )
-        for alt in (f"127.0.0.1,{port}", f"localhost,{port}"):
-            if alt not in candidates:
-                candidates.append(alt)
         print()
 
     for candidate in candidates:

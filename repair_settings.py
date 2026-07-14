@@ -13,7 +13,8 @@ SETTINGS_PATH = BASE_DIR / "local.settings.json"
 OPENAI_KEY = (
     "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"
 )
-SQL_SERVER = "172.18.0.4,1433"
+SQL_SERVER = "127.0.0.1,1433"
+SQL_SERVER_ALTERNATES = "172.18.0.4,1433;localhost,1433;host.docker.internal,1433;VMWinSQLS,1433"
 SQL_DATABASE = "Prohance"
 SQL_USER = "VMWinSQLS"
 SQL_PASSWORD = "Aks@2026"
@@ -52,6 +53,7 @@ def repair_settings() -> None:
         password = existing
 
     values["SqlServer"] = SQL_SERVER
+    values["SqlServerAlternates"] = SQL_SERVER_ALTERNATES
     values["SqlDatabase"] = SQL_DATABASE
     values["SqlUser"] = SQL_USER
     values["SqlPassword"] = password

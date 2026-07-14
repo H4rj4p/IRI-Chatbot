@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import socket
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -37,6 +38,7 @@ SETTINGS_ENV_KEYS = (
     "SqlConnectionString",
     "SqlServerHost",
     "SqlServer",
+    "SqlServerAlternates",
     "SqlDatabase",
     "SqlUser",
     "SqlPassword",
@@ -87,6 +89,7 @@ def collect_settings_values(settings):
         "ConnectionStrings:SqlConnectionString",
         "SqlServerHost",
         "SqlServer",
+        "SqlServerAlternates",
         "SqlDatabase",
         "SqlUser",
         "SqlPassword",
@@ -339,6 +342,10 @@ def get_settings_status():
         and os.environ.get("OpenAIApiKey", "").strip() not in {"YOUR_OPENAI_API_KEY"},
         "connection": get_connection_summary(),
         "networkWarning": get_network_warning(),
+        "access": get_access_info(),
+        "sqlCandidates": alternate_sql_servers(
+            (get_connection_summary() or {}).get("server", "")
+        ),
     }
 
 
@@ -403,17 +410,132 @@ def split_server_host_port(server):
     return text, "1433"
 
 
+def _add_server_candidate(candidates, seen, server):
+    text = (server or "").strip()
+    if not text:
+        return
+    key = text.lower()
+    if key in seen:
+        return
+    seen.add(key)
+    candidates.append(text)
+
+
+def parse_server_list(raw):
+    """Parse 'host,port;host2,port2' or JSON list into server strings."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            data = json.loads(text)
+            if isinstance(data, list):
+                return [str(item).strip() for item in data if str(item).strip()]
+        except Exception:
+            pass
+
+    servers = []
+    # Prefer semicolon / newline separators between full Server= values.
+    chunks = []
+    for part in text.replace("\n", ";").split(";"):
+        part = part.strip()
+        if part:
+            chunks.append(part)
+
+    if len(chunks) == 1 and chunks[0].count(",") > 1:
+        # Legacy comma-only list: host,port,host,port
+        pieces = [p.strip() for p in chunks[0].split(",") if p.strip()]
+        paired = []
+        index = 0
+        while index < len(pieces):
+            host = pieces[index]
+            if index + 1 < len(pieces) and pieces[index + 1].isdigit():
+                paired.append(f"{host},{pieces[index + 1]}")
+                index += 2
+            else:
+                paired.append(host)
+                index += 1
+        return paired
+
+    return chunks
+
+
 def alternate_sql_servers(server):
-    """When SqlServer is a Docker IP, also try localhost on the same port."""
+    """Build a list of SQL hosts to try so the same settings work on more machines.
+
+    Order favors addresses that work when the chatbot runs on the SQL Server PC
+    (localhost), then Docker/internal, then configured host / hostname.
+    """
     host, port = split_server_host_port(server)
     candidates = []
-    if server:
-        candidates.append(server.strip())
-    if is_docker_style_host(host):
-        for alt in (f"127.0.0.1,{port}", f"localhost,{port}"):
-            if alt not in candidates:
-                candidates.append(alt)
+    seen = set()
+
+    # Prefer local published SQL first when the configured host looks Docker-only.
+    if is_docker_style_host(host) or not host:
+        for alt in (f"127.0.0.1,{port}", f"localhost,{port}", f"host.docker.internal,{port}"):
+            _add_server_candidate(candidates, seen, alt)
+
+    _add_server_candidate(candidates, seen, server.strip() if server else "")
+
+    extras = os.environ.get("SqlServerAlternates", "").strip()
+    for part in parse_server_list(extras):
+        _add_server_candidate(candidates, seen, part)
+
+    # Always keep local options available even for LAN IPs (same machine runs both).
+    for alt in (f"127.0.0.1,{port}", f"localhost,{port}", f"host.docker.internal,{port}"):
+        _add_server_candidate(candidates, seen, alt)
+
+    # Windows / Docker hostname previously used as login/server name.
+    sql_user = os.environ.get("SqlUser", "").strip()
+    if sql_user and "\\" not in sql_user and "/" not in sql_user:
+        _add_server_candidate(candidates, seen, f"{sql_user},{port}")
+
+    if host and not is_docker_style_host(host):
+        _add_server_candidate(candidates, seen, f"{host},{port}")
+
+    # Last resort: original Docker IP from prior setup.
+    _add_server_candidate(candidates, seen, f"172.18.0.4,{port}")
+
     return candidates
+
+
+WORKING_SQL_SERVER = None
+
+
+def persist_working_sql_server(server):
+    """Remember the host that connected so the next start is faster."""
+    global WORKING_SQL_SERVER
+    WORKING_SQL_SERVER = server
+    path = LOADED_SETTINGS_PATH or LOCAL_SETTINGS_PATH
+    if path is None or not Path(path).exists():
+        return
+    try:
+        settings = read_settings_file(Path(path))
+        values = settings.setdefault("Values", settings if isinstance(settings, dict) else {})
+        if not isinstance(values, dict):
+            return
+        current = str(values.get("SqlServer") or "").strip()
+        if current.lower() == server.lower():
+            os.environ["SqlServer"] = server
+            return
+        values["SqlServer"] = server
+        password = str(values.get("SqlPassword") or os.environ.get("SqlPassword") or "").strip()
+        database = str(values.get("SqlDatabase") or os.environ.get("SqlDatabase") or "").strip()
+        user = str(values.get("SqlUser") or os.environ.get("SqlUser") or "").strip()
+        values["SqlConnectionString"] = (
+            "Driver={ODBC Driver 18 for SQL Server};"
+            f"Server={server};"
+            f"Database={database};"
+            f"User ID={user};"
+            f"Password={password};"
+            "Encrypt=yes;TrustServerCertificate=yes;"
+        )
+        Path(path).write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        os.environ["SqlServer"] = server
+        os.environ["SqlConnectionString"] = values["SqlConnectionString"]
+        print(f"Saved working SqlServer={server} to {path}")
+    except Exception as exc:
+        print(f"Could not persist working SqlServer ({server}): {exc}")
 
 
 def get_network_warning():
@@ -422,11 +544,58 @@ def get_network_warning():
     if is_docker_style_host(server_host):
         return (
             f"SqlServer is {server_host}, which is often a Docker/internal IP. "
-            "If this chatbot runs on the SQL Server PC itself, try SqlServer=\"127.0.0.1,1433\". "
-            "From another PC, use the SQL machine Ethernet/Wi-Fi IPv4 from ipconfig "
-            "(usually 192.168.x.x or 10.x.x.x), e.g. \"192.168.1.50,1433\"."
+            "Run the chatbot on the SQL Server PC (start_anywhere.bat). "
+            "It will auto-try 127.0.0.1 and save the working address. "
+            "Then open the printed LAN or tunnel URL from any phone/PC."
         )
     return None
+
+
+def list_lan_access_urls(port):
+    """URLs other devices on the same Wi-Fi/LAN can use to open the chat."""
+    urls = [f"http://127.0.0.1:{port}/api/Chat", f"http://localhost:{port}/api/Chat"]
+    hosts = set()
+    try:
+        hostname = socket.gethostname()
+        if hostname:
+            hosts.add(hostname)
+            try:
+                hosts.add(socket.gethostbyname(hostname))
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.settimeout(0.5)
+        probe.connect(("8.8.8.8", 80))
+        hosts.add(probe.getsockname()[0])
+        probe.close()
+    except OSError:
+        pass
+
+    for host in sorted(hosts):
+        if not host or host.startswith("127.") or host == "::1":
+            continue
+        if ":" in host:  # skip raw IPv6 for simple LAN links
+            continue
+        urls.append(f"http://{host}:{port}/api/Chat")
+    return list(dict.fromkeys(urls))
+
+
+def get_access_info():
+    port = int(os.environ.get("PORT", "7179"))
+    return {
+        "port": port,
+        "localUrl": f"http://127.0.0.1:{port}/api/Chat",
+        "lanUrls": list_lan_access_urls(port),
+        "hint": (
+            "Keep this app running on the SQL Server PC. "
+            "On your phone or another computer, open one of the lanUrls "
+            "(same Wi-Fi) or use start_anywhere.bat for an internet tunnel URL."
+        ),
+    }
 
 
 def get_openai_config_error():
@@ -470,11 +639,9 @@ def explain_sql_error(exc):
     if "handshakes before login" in lower or ("08001" in lower and "26)" in message):
         hints.append(
             "TCP reached the address, but SQL Server never completed the login handshake. "
-            "That usually means 172.18.x.x is a Docker/internal IP, not reachable from here. "
-            "Fix: run the chatbot on the SQL Server PC and set SqlServer to \"127.0.0.1,1433\" "
-            "(or the Docker-published host port). From another PC, use the SQL machine "
-            "Ethernet/Wi-Fi IPv4 from ipconfig (usually 192.168.x.x or 10.x.x.x). "
-            "Then run: python diagnose_sql.py"
+            "Run start_anywhere.bat on the SQL Server PC (not in the cloud). "
+            "The app auto-tries 127.0.0.1 / localhost and saves the working host. "
+            "Then open the printed LAN or Cloudflare URL from any device."
         )
     elif any(
         token in lower
@@ -587,6 +754,7 @@ def connection_string_for_server(server):
 
 
 def open_sql_server_connection():
+    global WORKING_SQL_SERVER
     if pyodbc is None:
         raise RuntimeError(
             "pyodbc could not load. Install pyodbc and Microsoft ODBC Driver 18 for SQL Server, "
@@ -599,27 +767,36 @@ def open_sql_server_connection():
 
     values = parse_connection_string(connection_string)
     configured_server = values.get("server", "")
-    candidates = alternate_sql_servers(configured_server) or [configured_server]
+    candidates = []
+    seen = set()
+    if WORKING_SQL_SERVER:
+        _add_server_candidate(candidates, seen, WORKING_SQL_SERVER)
+    for server in alternate_sql_servers(configured_server) or [configured_server]:
+        _add_server_candidate(candidates, seen, server)
+
     errors = []
+    connect_timeout = int(os.environ.get("SqlConnectTimeout", "8"))
 
     for index, server in enumerate(candidates):
         candidate_cs = connection_string_for_server(server)
         try:
-            connection = pyodbc.connect(candidate_cs, timeout=30, autocommit=True)
-            if index > 0:
+            connection = pyodbc.connect(
+                candidate_cs, timeout=connect_timeout, autocommit=True
+            )
+            if server != configured_server:
                 print(
-                    f"Connected using fallback SqlServer={server} "
-                    f"(configured {configured_server} failed). "
-                    f"Update local.settings.json SqlServer to \"{server}\" permanently."
+                    f"Connected using SqlServer={server} "
+                    f"(configured {configured_server or '(none)'})."
                 )
+                persist_working_sql_server(server)
+            else:
+                WORKING_SQL_SERVER = server
             return connection
         except Exception as exc:
             errors.append(f"{server}: {exc}")
-            # Only fall back for Docker-style hosts after network/handshake failures.
             message = str(exc).lower()
-            if index == 0 and not is_docker_style_host(configured_server):
-                raise
-            if index == 0 and not any(
+            # Keep trying other hosts for network / handshake style failures.
+            if any(
                 token in message
                 for token in (
                     "handshake",
@@ -630,12 +807,27 @@ def open_sql_server_connection():
                     "actively refused",
                     "network path",
                     "hy000",
+                    "hyt00",
+                    "server is not found",
+                    "named pipes provider",
+                    "no such host",
+                    "getaddrinfo",
+                    "could not translate",
                 )
+            ):
+                continue
+            # Auth / database errors mean we reached SQL; do not keep guessing hosts.
+            if index == 0 and (
+                "login failed" in message
+                or "cannot open database" in message
+                or "password" in message
             ):
                 raise
 
     raise RuntimeError(
         "Could not connect to SQL Server with any candidate address. "
+        "Run this app on the SQL Server PC with start_anywhere.bat, then open the "
+        "printed URL from any device. Tried: "
         + " | ".join(errors)
     )
 
@@ -1439,6 +1631,11 @@ def get_database_schema():
         return jsonify({"success": False, "error": str(exc)})
 
 
+@app.route("/api/AccessInfo", methods=["GET"])
+def access_info():
+    return jsonify({"success": True, **get_access_info()})
+
+
 @app.route("/api/TestSqlConnection", methods=["GET", "POST"])
 def test_sql_connection():
     reload_local_settings()
@@ -1650,5 +1847,10 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "7179"))
     host = os.environ.get("HOST", "0.0.0.0")
     print_startup_config()
+    access = get_access_info()
     print(f"Starting IRI AI on http://localhost:{port}/api/Chat")
+    print("Open from this PC or any device on the same Wi-Fi:")
+    for url in access["lanUrls"]:
+        print(f"  {url}")
+    print("For internet access from any device, use start_anywhere.bat (Cloudflare tunnel).")
     app.run(host=host, port=port, debug=False)

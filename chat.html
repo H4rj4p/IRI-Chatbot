@@ -376,12 +376,19 @@
       try {
         const res = await fetch(`${base}/api/TestSqlConnection`);
         const data = await res.json();
+        const access = (data.config && data.config.access) || {};
+        const lanUrls = access.lanUrls || [];
+        const accessTip = lanUrls.length
+          ? `\n\nOpen this chat from any device on the same Wi-Fi:\n${lanUrls.map((u) => `• ${u}`).join("\n")}\n\nFor internet access, run start_anywhere.bat on the SQL Server PC and use the Cloudflare URL.`
+          : "\n\nRun start_anywhere.bat on the SQL Server PC, then open the printed URL from any device.";
+
         if (data.success) {
           status.textContent = `Connected: ${data.database}`;
           status.className = "ok";
           const welcome = document.getElementById("welcome");
           if (welcome) {
-            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`;
+            welcome.innerHTML = `Hi! I'm IRI AI. You're connected to <strong>${escapeHtml(data.database)}</strong>. Ask anything about your data in plain English.`
+              + `<div class="meta">Any device: keep the app running on the SQL Server PC, then open this same page URL (or the Cloudflare URL from start_anywhere.bat).</div>`;
           }
         } else {
           status.textContent = "DB not connected";
@@ -404,14 +411,15 @@
             data.config && data.config.settingsPath
               ? `\nSettings file: ${data.config.settingsPath}`
               : "",
-            "\n\nAfter editing local.settings.json, stop the app (Ctrl+C) and run: python app.pyw",
+            accessTip,
+            "\n\nOn the SQL Server PC run: start_anywhere.bat",
           ].join("");
           addBot(`The database isn't connected yet.\n\n${details}`);
         }
       } catch {
         status.textContent = "App not running";
         status.className = "bad";
-        addBot("The app isn't running. Start it with: python app.pyw");
+        addBot("The app isn't running. On the SQL Server PC double-click start_anywhere.bat");
       }
     }
 
