@@ -23,6 +23,17 @@ Status can say **App running · DB later** until SQL is connected — that is fi
 | App health | http://localhost:7179/api/Health |
 | SQL test | http://localhost:7179/api/TestSqlConnection |
 
+## Connect to Prohance
+
+1. Run `python app.pyw` and open http://localhost:7179/api/Chat
+2. In the **Connect to Prohance** panel, enter the SQL Server address:
+   - On the SQL PC itself: click **Try 127.0.0.1**
+   - From another PC: on the SQL PC run `ipconfig`, copy the Ethernet/Wi-Fi IPv4
+     (usually `192.168.x.x`), paste it, click **Connect**
+3. Database `Prohance`, user `VMWinSQLS`, and password are already in `local.settings.json`
+
+Do **not** use `172.18.0.4` from a different PC — that Docker IP only works on the SQL host.
+
 ## Settings
 
 Edit `local.settings.json` next to `app.pyw` for SQL Server and OpenAI values.

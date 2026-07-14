@@ -1656,6 +1656,143 @@ def get_database_schema():
         return jsonify({"success": False, "error": str(exc)})
 
 
+@app.route("/api/SqlSettings", methods=["GET"])
+def sql_settings():
+    """Safe settings summary for the connect form (no password returned)."""
+    reload_local_settings()
+    summary = get_connection_summary()
+    return jsonify(
+        {
+            "success": True,
+            "server": summary.get("server", ""),
+            "database": summary.get("database", "") or "Prohance",
+            "user": summary.get("user", "") or "VMWinSQLS",
+            "passwordSet": bool(summary.get("passwordSet")),
+            "candidates": alternate_sql_servers(summary.get("server", "")),
+            "hint": (
+                "Database is Prohance. If this PC is not the SQL Server machine, "
+                "enter the SQL PC Ethernet/Wi-Fi IPv4 from ipconfig "
+                "(usually 192.168.x.x), not 172.18.0.4."
+            ),
+        }
+    )
+
+
+@app.route("/api/ConnectDatabase", methods=["POST"])
+def connect_database():
+    """Update SqlServer in local.settings.json and test the Prohance connection."""
+    reload_local_settings()
+    payload = request.get_json(silent=True) or {}
+    server = str(payload.get("server") or "").strip()
+    if not server:
+        return jsonify(
+            {
+                "success": False,
+                "message": "Enter a SQL Server address.",
+                "hint": "Example: 192.168.1.50,1433 or 127.0.0.1,1433",
+            }
+        )
+
+    if "," not in server and "\\" not in server:
+        server = f"{server},1433"
+
+    database = str(
+        payload.get("database")
+        or os.environ.get("SqlDatabase")
+        or "Prohance"
+    ).strip()
+    user = str(
+        payload.get("user") or os.environ.get("SqlUser") or "VMWinSQLS"
+    ).strip()
+    password = str(
+        payload.get("password") or os.environ.get("SqlPassword") or ""
+    ).strip()
+    if not password or password in {"YOUR_PASSWORD", "PASSWORD"}:
+        return jsonify(
+            {
+                "success": False,
+                "message": "SqlPassword is not set in local.settings.json.",
+                "hint": "Set SqlPassword in local.settings.json, then try again.",
+            }
+        )
+
+    path = Path(LOADED_SETTINGS_PATH or LOCAL_SETTINGS_PATH)
+    try:
+        settings = read_settings_file(path) if path.exists() else {"IsEncrypted": False, "Values": {}}
+    except Exception:
+        settings = {"IsEncrypted": False, "Values": {}}
+    values = settings.setdefault("Values", {})
+    if not isinstance(values, dict):
+        values = {}
+        settings["Values"] = values
+
+    values["SqlServer"] = server
+    values["SqlDatabase"] = database
+    values["SqlUser"] = user
+    values["SqlPassword"] = password
+    values["SqlConnectionString"] = (
+        "Driver={ODBC Driver 18 for SQL Server};"
+        f"Server={server};"
+        f"Database={database};"
+        f"User ID={user};"
+        f"Password={password};"
+        "Encrypt=yes;TrustServerCertificate=yes;"
+    )
+    if "OpenAIApiKey" not in values and os.environ.get("OpenAIApiKey"):
+        values["OpenAIApiKey"] = os.environ.get("OpenAIApiKey")
+    if "OpenAIModel" not in values:
+        values["OpenAIModel"] = os.environ.get("OpenAIModel") or "gpt-4o-mini"
+
+    try:
+        path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    except Exception as exc:
+        return jsonify(
+            {
+                "success": False,
+                "message": f"Could not save local.settings.json: {exc}",
+            }
+        )
+
+    global WORKING_SQL_SERVER
+    WORKING_SQL_SERVER = None
+    reload_local_settings()
+
+    # Full connection attempt (including alternates).
+    os.environ.pop("SqlTryAlternates", None)
+    os.environ["SqlConnectTimeout"] = os.environ.get("SqlConnectTimeoutConnect", "8")
+    try:
+        with open_sql_server_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT @@VERSION AS ServerVersion, DB_NAME() AS DatabaseName"
+                )
+                rows = rows_as_dicts(cursor)
+                row = rows[0] if rows else {}
+        summary = get_connection_summary()
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Connected to {row.get('DatabaseName') or database}.",
+                "server": summary.get("server", server),
+                "database": row.get("DatabaseName", database),
+                "serverVersion": row.get("ServerVersion", ""),
+                "config": get_settings_status(),
+            }
+        )
+    except Exception as exc:
+        return jsonify(
+            {
+                "success": False,
+                "message": "Saved settings, but could not connect yet.",
+                "error": str(exc),
+                "hint": explain_sql_error(exc),
+                "server": server,
+                "database": database,
+                "config": get_settings_status(),
+            }
+        )
+
+
 @app.route("/api/AccessInfo", methods=["GET"])
 def access_info():
     return jsonify({"success": True, **get_access_info()})
